@@ -1,0 +1,60 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: broker-postgres
+    environment:
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      POSTGRES_DB: broker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U broker"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: broker-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - promdata:/prometheus
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  broker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: broker-api
+    command: ["serve", "--port", "8080"]
+    environment:
+      BROKER_DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker
+      BROKER_PROMETHEUS_URL: http://prometheus:9090
+      BROKER_K8S_IN_CLUSTER: "false"
+      BROKER_LOG_LEVEL: DEBUG
+      BROKER_ENVIRONMENT: development
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+
+volumes:
+  pgdata:
+  promdata:
