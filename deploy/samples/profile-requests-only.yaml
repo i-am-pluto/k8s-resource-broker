@@ -1,0 +1,16 @@
+apiVersion: resource-broker.io/v1alpha1
+kind: ResourceProfile
+metadata:
+  name: k8s-requests-only
+  namespace: default
+spec:
+  resource-type: k8s-pod
+  fields:
+    cpu_request:
+      strategy:
+        algo: static
+        value: "500m"
+    memory_request:
+      strategy:
+        algo: static
+        value: "1Gi"

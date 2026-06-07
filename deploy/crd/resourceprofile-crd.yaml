@@ -1,0 +1,83 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: resourceprofiles.resource-broker.io
+  labels:
+    app.kubernetes.io/name: resource-broker
+spec:
+  group: resource-broker.io
+  names:
+    kind: ResourceProfile
+    listKind: ResourceProfileList
+    plural: resourceprofiles
+    singular: resourceprofile
+    shortNames:
+      - rp
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - resource-type
+              properties:
+                resource-type:
+                  type: string
+                  description: "Resource type (e.g. k8s-pod)"
+                mode:
+                  type: string
+                  enum:
+                    - recommendation
+                    - enforce
+                  default: recommendation
+                  description: "recommendation = log only, enforce = apply patches to pods"
+                strategy:
+                  type: object
+                  description: "Default strategy applied to all fields unless overridden. algo determines remaining keys."
+                  x-kubernetes-preserve-unknown-fields: true
+                  properties:
+                    algo:
+                      type: string
+                      description: "Algorithm name (percentile, static, derived)"
+                fields:
+                  type: object
+                  description: "Map of field-name to config. Only listed fields are tuned."
+                  additionalProperties:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      locator:
+                        type: string
+                        description: "Optional JSON patch path override (default path used if omitted)"
+                      min:
+                        type: string
+                        description: "Lower bound for computed value (e.g. 100m, 256Mi)"
+                      max:
+                        type: string
+                        description: "Upper bound for computed value (e.g. 4, 2Gi)"
+                      strategy:
+                        type: object
+                        description: "Field-level strategy override. Falls back to spec.strategy if omitted."
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          algo:
+                            type: string
+                            description: "Algorithm name (percentile, static, derived)"
+      additionalPrinterColumns:
+        - name: ResourceType
+          type: string
+          jsonPath: .spec.resource-type
+        - name: Mode
+          type: string
+          jsonPath: .spec.mode
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -1,0 +1,24 @@
+apiVersion: resource-broker.io/v1alpha1
+kind: ResourceProfile
+metadata:
+  name: hello-world
+  namespace: default
+spec:
+  resource-type: k8s-pod
+  strategy:
+    algo: static
+    value: "100m"
+  fields:
+    cpu_request: {}
+    memory_request:
+      strategy:
+        algo: static
+        value: "64Mi"
+    cpu_limit:
+      strategy:
+        algo: static
+        value: "200m"
+    memory_limit:
+      strategy:
+        algo: static
+        value: "128Mi"

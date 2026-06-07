@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+  namespace: default
+  labels:
+    app: hello-world
+  annotations:
+    # resource-broker patches cpu_request, memory_request, cpu_limit, memory_limit
+    # via the hello-world ResourceProfile before the pod is scheduled
+    resource-broker/profile: "hello-world"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+      annotations:
+        resource-broker/profile: "hello-world"
+    spec:
+      containers:
+        - name: hello-world
+          image: hashicorp/http-echo:latest
+          args:
+            - "-text=hello from k8s-resource-broker"
+            - "-listen=:8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          # resource-broker fills these in at admission time
+          resources: {}

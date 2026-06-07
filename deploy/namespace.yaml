@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: resource-broker
+  labels:
+    app.kubernetes.io/name: resource-broker
+    app.kubernetes.io/part-of: k8s-resource-broker

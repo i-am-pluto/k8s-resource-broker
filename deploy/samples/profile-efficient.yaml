@@ -1,0 +1,24 @@
+apiVersion: resource-broker.io/v1alpha1
+kind: ResourceProfile
+metadata:
+  name: k8s-efficient
+  namespace: default
+spec:
+  resource-type: k8s-pod
+  fields:
+    cpu_request:
+      strategy:
+        algo: static
+        value: "250m"
+    memory_request:
+      strategy:
+        algo: static
+        value: "256Mi"
+    cpu_limit:
+      strategy:
+        algo: static
+        value: "500m"
+    memory_limit:
+      strategy:
+        algo: static
+        value: "512Mi"

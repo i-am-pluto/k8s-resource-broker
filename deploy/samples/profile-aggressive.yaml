@@ -1,0 +1,15 @@
+apiVersion: resource-broker.io/v1alpha1
+kind: ResourceProfile
+metadata:
+  name: k8s-aggressive
+  namespace: default
+spec:
+  resource-type: k8s-pod
+  strategy:
+    algo: percentile
+    transform: p75
+  fields:
+    cpu_request: {}
+    cpu_limit:
+      min: "100m"
+      max: "8"

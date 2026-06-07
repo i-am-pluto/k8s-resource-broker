@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-broker
+  namespace: resource-broker
+  labels:
+    app.kubernetes.io/name: resource-broker
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: resource-broker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: resource-broker
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: resource-broker
+      containers:
+        - name: broker
+          image: k8s-resource-broker:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "resource_broker"]
+          args: ["serve", "--port", "8080"]
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: broker-config
+          env:
+            - name: BROKER_K8S_IN_CLUSTER
+              value: "true"
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
