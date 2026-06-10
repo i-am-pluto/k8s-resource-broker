@@ -5,10 +5,6 @@ metadata:
   namespace: default
   labels:
     app: hello-world
-  annotations:
-    # resource-broker patches cpu_request, memory_request, cpu_limit, memory_limit
-    # via the hello-world ResourceProfile before the pod is scheduled
-    resource-broker/profile: "hello-world"
 spec:
   replicas: 2
   selector:
@@ -18,8 +14,9 @@ spec:
     metadata:
       labels:
         app: hello-world
+        resource-broker/profile: "hello-world"  # label triggers objectSelector on MutatingWebhookConfiguration
       annotations:
-        resource-broker/profile: "hello-world"
+        resource-broker/profile: "hello-world"  # annotation read by handler.py as fallback
     spec:
       containers:
         - name: hello-world
