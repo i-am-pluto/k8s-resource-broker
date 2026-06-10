@@ -20,12 +20,15 @@ async def handle_admission_review(
     uid = req.get("uid", "")
     obj = req.get("object", {})
     metadata = obj.get("metadata", {})
+    labels = metadata.get("labels", {})
     annotations = metadata.get("annotations", {})
 
-    profile_name = annotations.get(settings.profile_annotation_key)
+    # objectSelector in MutatingWebhookConfiguration matches on labels, so check
+    # labels first; fall back to annotations for backward compatibility.
+    profile_name = labels.get(settings.profile_annotation_key) or annotations.get(settings.profile_annotation_key)
 
     if not profile_name:
-        logger.debug("no profile annotation, allowing without patch", uid=uid)
+        logger.debug("no profile label/annotation, allowing without patch", uid=uid)
         return _allow_response(uid)
 
     try:

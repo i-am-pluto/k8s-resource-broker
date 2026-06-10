@@ -5,8 +5,6 @@ metadata:
   namespace: default
   labels:
     app: my-app
-  annotations:
-    resource-broker/profile: "k8s-efficient"
 spec:
   replicas: 1
   selector:
@@ -16,9 +14,13 @@ spec:
     metadata:
       labels:
         app: my-app
+        resource-broker/profile: "k8s-efficient"  # label triggers objectSelector on MutatingWebhookConfiguration
+      annotations:
+        resource-broker/profile: "k8s-efficient"  # annotation read by handler.py as fallback
     spec:
       containers:
         - name: my-app
           image: nginx:alpine
           ports:
             - containerPort: 80
+          resources: {}  # broker fills this in at admission time
