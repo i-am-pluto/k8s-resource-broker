@@ -64,6 +64,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 step "Starting minikube cluster" \
     minikube start \
         --cpus=3 --memory=6g --driver=docker \
+        --feature-gates=InPlacePodVerticalScaling=true \
+        --extra-config=apiserver.feature-gates=InPlacePodVerticalScaling=true \
         --profile="$CLUSTER_NAME"
 
 step "Enabling metrics-server addon" \
@@ -136,6 +138,12 @@ info "PostgreSQL port-forward stopped"
 # ── Step 5: Deploy broker RBAC + ConfigMap ─────────────────────────────────
 step "Deploying RBAC" \
     kubectl apply -f "$ROOT_DIR/deploy/resource-broker/rbac.yaml"
+
+step "Installing ResourceProfile CRD" \
+    kubectl apply -f "$ROOT_DIR/deploy/crd/resourceprofile-crd.yaml"
+
+step "Creating ResourceProfile CR (k8s-efficient, enforce mode)" \
+    kubectl apply -f "$ROOT_DIR/deploy/samples/profile-efficient.yaml"
 
 # Deploy configmap (but override the database URL to use postgres service)
 step "Deploying ConfigMap" \

@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: resource-broker
 data:
   BROKER_DATABASE_URL: "postgresql+asyncpg://broker:broker@postgres:5432/broker"
-  BROKER_PROMETHEUS_URL: "http://prometheus:9090"
+  BROKER_METRICS_URL: "http://prometheus:9090"
   BROKER_K8S_IN_CLUSTER: "true"
   BROKER_LOG_LEVEL: "INFO"
   BROKER_ENVIRONMENT: "production"
