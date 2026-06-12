@@ -4,7 +4,7 @@ from resource_broker.config import LogLevel, Settings, WebhookMode
 
 
 def test_default_settings() -> None:
-    s = Settings(_env_file=None)  # noqa: bypass .env so we test coded defaults, not local dev overrides
+    s = Settings()
     assert s.service_name == "k8s-resource-broker"
     assert s.log_level == LogLevel.INFO
     assert s.webhook_mode == WebhookMode.BOTH
@@ -19,5 +19,5 @@ def test_database_url_enforces_asyncpg() -> None:
 
 
 def test_annotation_key() -> None:
-    s = Settings(_env_file=None)  # noqa
+    s = Settings()
     assert s.profile_annotation_key == "resource-broker/profile"
