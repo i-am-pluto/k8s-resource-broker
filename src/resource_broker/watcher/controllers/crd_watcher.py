@@ -6,6 +6,9 @@ from typing import Any
 from kubernetes import client as k8s_client, watch as k8s_watch
 from structlog import get_logger
 
+from resource_broker.common.dao.database import get_session
+from resource_broker.common.dao.repositories.profiles import ProfileRepository
+from resource_broker.common.models.profile import ResourceProfile
 from resource_broker.common.services.profile_registry import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from resource_broker.common.services.recommendation_service import RecommendationService
 
@@ -16,17 +19,21 @@ async def run_crd_watch_loop(
     api: k8s_client.CustomObjectsApi,
     svc: RecommendationService,
 ) -> None:
-    """Background task: watch ResourceProfile CRDs, keep registry + cache in sync."""
+    """Background task: watch ResourceProfile CRDs, keep registry + cache + DB in sync."""
     loop = asyncio.get_running_loop()
     while True:
         try:
-            await loop.run_in_executor(None, _watch_once, api, svc)
+            await loop.run_in_executor(None, _watch_once, api, svc, loop)
         except Exception:
             logger.exception("crd watch loop crashed, restarting in 5s")
             await asyncio.sleep(5)
 
 
-def _watch_once(api: k8s_client.CustomObjectsApi, svc: RecommendationService) -> None:
+def _watch_once(
+    api: k8s_client.CustomObjectsApi,
+    svc: RecommendationService,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
     watcher = k8s_watch.Watch()
     logger.info("crd watch started", group=CRD_GROUP, plural=CRD_PLURAL)
     try:
@@ -36,25 +43,56 @@ def _watch_once(api: k8s_client.CustomObjectsApi, svc: RecommendationService) ->
             version=CRD_VERSION,
             plural=CRD_PLURAL,
         ):
-            _handle_event(event, svc)
+            _handle_event(event, svc, loop)
     except Exception:
         logger.exception("crd watch stream error")
         raise
 
 
-def _handle_event(event: dict[str, Any], svc: RecommendationService) -> None:
+def _handle_event(
+    event: dict[str, Any],
+    svc: RecommendationService,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
     event_type: str = event.get("type", "")
     obj: dict[str, Any] = event.get("object", {})
     metadata = obj.get("metadata", {}) or {}
     name = metadata.get("name", "unknown")
     namespace = metadata.get("namespace", "default")
 
-    if event_type in ("ADDED", "MODIFIED"):
-        svc.registry.upsert(obj)
-        if event_type == "MODIFIED":
+    profile: ResourceProfile | None = None
+    try:
+        if event_type in ("ADDED", "MODIFIED"):
+            profile = svc.registry.upsert(obj)
+            if event_type == "MODIFIED":
+                svc.invalidate(name, namespace)
+                logger.info("profile modified, cache invalidated", name=name, namespace=namespace)
+        elif event_type == "DELETED":
+            svc.registry.remove(name, namespace)
             svc.invalidate(name, namespace)
-            logger.info("profile modified, cache invalidated", name=name, namespace=namespace)
-    elif event_type == "DELETED":
-        svc.registry.remove(name, namespace)
-        svc.invalidate(name, namespace)
-        logger.info("profile deleted, removed from registry", name=name, namespace=namespace)
+            logger.info("profile deleted, removed from registry", name=name, namespace=namespace)
+    except Exception:
+        logger.exception("error handling crd event", event_type=event_type, name=name)
+
+    # Fire-and-forget DB persist — a DB failure never blocks the watcher.
+    asyncio.run_coroutine_threadsafe(
+        _persist_event(event_type, profile, name, namespace),
+        loop,
+    )
+
+
+async def _persist_event(
+    event_type: str,
+    profile: ResourceProfile | None,
+    name: str,
+    namespace: str,
+) -> None:
+    try:
+        async with get_session() as session:
+            repo = ProfileRepository(session)
+            if event_type in ("ADDED", "MODIFIED") and profile is not None:
+                await repo.upsert(profile)
+            elif event_type == "DELETED":
+                await repo.soft_delete(name, namespace)
+    except Exception:
+        logger.exception("failed to persist profile event to db", event_type=event_type, name=name)

@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Double, Index, String, Uuid, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -29,3 +30,21 @@ class PodMetricModel(Base):
         Index("idx_metrics_scraped", "profile_name", "scraped_at"),
         Index("idx_metrics_pod", "namespace", "pod_name", "container"),
     )
+
+
+class ProfileModel(Base):
+    __tablename__ = "resource_profiles"
+
+    # Composite PK mirrors Kubernetes (namespace, name) identity.
+    name: Mapped[str] = mapped_column(String(253), primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(253), primary_key=True)
+    resource_type: Mapped[str] = mapped_column(String(253), nullable=False)
+    mode: Mapped[str] = mapped_column(String(64), nullable=False, server_default="recommendation")
+    # JSONB: efficient storage + GIN-indexable if needed later.
+    strategy: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # Soft delete preserves audit trail when a CRD is removed.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
