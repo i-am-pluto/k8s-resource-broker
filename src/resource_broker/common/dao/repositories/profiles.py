@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import struct
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from structlog import get_logger
@@ -43,12 +42,6 @@ def _content_hash(profile: ResourceProfile) -> str:
         },
     }
     return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
-
-
-def _advisory_lock_key(name: str, namespace: str) -> int:
-    """Stable int64 keyed to (namespace, name) — suitable for pg_try_advisory_xact_lock."""
-    digest = hashlib.sha256(f"{namespace}/{name}".encode()).digest()
-    return struct.unpack(">q", digest[:8])[0]
 
 
 def _to_domain(row: ProfileVersionModel) -> ResourceProfile:
@@ -89,38 +82,32 @@ class ProfileRepository:
         self._session = session
 
     async def record_version(self, profile: ResourceProfile) -> uuid.UUID | None:
-        """SCD Type 2 insert for a profile.
+        """SCD Type 2 insert for a profile using optimistic concurrency control.
 
         Returns:
-            The active profile_id (new or existing) if the write was handled.
-            None if another replica holds the advisory lock — the caller should skip.
+            The active profile_id (new or existing) if this replica handled the write.
+            None if another replica won the optimistic race — the caller should skip.
 
-        Distributed safety:
-            pg_try_advisory_xact_lock prevents two replicas from racing on the
-            same (name, namespace) pair. The lock is transaction-scoped — released
-            automatically on commit or rollback.
+        Two-layer protection:
 
-        Idempotency:
-            A content_hash check ensures that repeated delivery of the same CRD
-            event (k8s watch reconnects, bootstrap re-list) produces no DB write.
+        1. Content hash (idempotency): if the profile content has not changed since
+           the last DB row, return the existing profile_id with zero writes. Handles
+           repeated delivery of the same CRD event (watch reconnects, bootstrap re-list).
+
+        2. Optimistic version column (distributed race): when content HAS changed, expire
+           the current row with WHERE version = $known_version. PostgreSQL row-level locking
+           ensures exactly one replica's UPDATE affects 1 row; all others see rowcount == 0
+           and skip. No explicit lock acquisition or infrastructure needed.
         """
         incoming_hash = _content_hash(profile)
-        lock_key = _advisory_lock_key(profile.name, profile.namespace)
 
-        locked: bool = await self._session.scalar(
-            select(func.pg_try_advisory_xact_lock(lock_key))
-        )
-        if not locked:
-            logger.debug(
-                "advisory lock not acquired; another replica is writing this profile",
-                name=profile.name,
-                namespace=profile.namespace,
-            )
-            return None
-
-        # Check whether the profile has actually changed.
+        # Read the current version (hash + version number for optimistic check).
         current = (await self._session.execute(
-            select(ProfileVersionModel.content_hash, ProfileVersionModel.profile_id)
+            select(
+                ProfileVersionModel.profile_id,
+                ProfileVersionModel.content_hash,
+                ProfileVersionModel.version,
+            )
             .where(
                 ProfileVersionModel.name == profile.name,
                 ProfileVersionModel.namespace == profile.namespace,
@@ -128,28 +115,38 @@ class ProfileRepository:
             )
         )).one_or_none()
 
+        # Layer 1: content unchanged → nothing to do.
         if current is not None and current.content_hash == incoming_hash:
             logger.debug("profile unchanged, skipping SCD insert", name=profile.name)
             return current.profile_id
 
         now = datetime.now(UTC)
 
-        # Expire the existing current version (if any).
+        # Layer 2: expire current row using the known version as an optimistic guard.
+        # If another replica already expired this row, rowcount == 0 and we skip.
         if current is not None:
-            await self._session.execute(
+            result = await self._session.execute(
                 update(ProfileVersionModel)
                 .where(
                     ProfileVersionModel.name == profile.name,
                     ProfileVersionModel.namespace == profile.namespace,
                     ProfileVersionModel.is_current.is_(True),
+                    ProfileVersionModel.version == current.version,
                 )
                 .values(is_current=False, valid_to=now)
             )
+            if result.rowcount == 0:
+                logger.debug(
+                    "optimistic version conflict: another replica already wrote this profile",
+                    name=profile.name,
+                    namespace=profile.namespace,
+                )
+                return None
 
-        # Build the new version.
+        # We won the race (or this is the first ever version). Insert the new row.
         default_algo_dict = profile.strategy.to_dict() if profile.strategy else None
         new_id = uuid.uuid4()
-        version = ProfileVersionModel(
+        self._session.add(ProfileVersionModel(
             profile_id=new_id,
             name=profile.name,
             namespace=profile.namespace,
@@ -161,13 +158,12 @@ class ProfileRepository:
                 if default_algo_dict else None
             ),
             content_hash=incoming_hash,
+            version=1,
             valid_from=now,
             valid_to=None,
             is_current=True,
-        )
-        self._session.add(version)
+        ))
 
-        # Insert normalized field rows (one per managed field).
         for field_name, entry in profile.fields.items():
             s_dict = entry.strategy.to_dict() if entry.strategy else {}
             self._session.add(ProfileFieldStrategyModel(
@@ -175,7 +171,6 @@ class ProfileRepository:
                 profile_id=new_id,
                 field_name=field_name,
                 locator=entry.locator,
-                # NULL algo = inherit profile-level default at runtime.
                 algo=s_dict.get("algo") if s_dict else None,
                 algo_config={k: v for k, v in s_dict.items() if k != "algo"} if s_dict else {},
                 min_value=entry.min,

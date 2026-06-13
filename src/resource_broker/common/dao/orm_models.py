@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Double, ForeignKey, Index, String, Uuid, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Double, ForeignKey, Index, Integer, String, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -47,6 +47,10 @@ class ProfileVersionModel(Base):
     default_algo_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # SHA-256 of canonical profile content — used for idempotency across distributed replicas.
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Optimistic concurrency version. Starts at 1 for every new SCD row.
+    # record_version() expires the current row with WHERE version=$v; if 0 rows
+    # are affected another replica won the race and this replica skips the insert.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))

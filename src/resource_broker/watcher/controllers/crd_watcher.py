@@ -87,12 +87,23 @@ async def _persist_event(
     name: str,
     namespace: str,
 ) -> None:
+    """Write CRD event to DB asynchronously.
+
+    ADDED/MODIFIED → record_version():
+      - Content hash check first: if profile content unchanged, zero DB write.
+      - Advisory lock: if another replica is concurrently writing this profile,
+        this replica skips (returns None). The winning replica handles the write.
+      - Only when content actually changed does a new SCD Type 2 row get inserted.
+
+    DELETED → soft_expire(): sets is_current=False, valid_to=now().
+      History rows are preserved; no data is deleted.
+    """
     try:
         async with get_session() as session:
             repo = ProfileRepository(session)
             if event_type in ("ADDED", "MODIFIED") and profile is not None:
-                await repo.upsert(profile)
+                await repo.record_version(profile)
             elif event_type == "DELETED":
-                await repo.soft_delete(name, namespace)
+                await repo.soft_expire(name, namespace)
     except Exception:
         logger.exception("failed to persist profile event to db", event_type=event_type, name=name)

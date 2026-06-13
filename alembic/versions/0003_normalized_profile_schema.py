@@ -36,6 +36,9 @@ def upgrade() -> None:
         sa.Column("default_algo", sa.String(64), nullable=True),
         sa.Column("default_algo_config", postgresql.JSONB(), nullable=True),
         sa.Column("content_hash", sa.String(64), nullable=False),
+        # Optimistic concurrency version. Starts at 1 for every new SCD row.
+        # Expiry UPDATE uses WHERE version=$v; rowcount==0 means another replica won.
+        sa.Column("version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("valid_from", sa.DateTime(timezone=True), nullable=False),
         sa.Column("valid_to", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("true")),

@@ -17,12 +17,15 @@ CRD_PLURAL = "resourceprofiles"
 
 
 class ProfileRegistry:
-    """In-memory store of all ResourceProfile CRDs, kept current via watch.
+    """Per-replica in-memory store of ResourceProfile CRDs.
 
-    On startup bootstrap() tries the Kubernetes API first; if that fails it falls
-    back to the DB so the registry is never empty after a restart.  Every CRD
-    event that reaches upsert()/remove() is also written through to the DB via
-    the watcher, so the DB always reflects the last-known cluster state.
+    NOT a distributed cache — each replica builds its own copy independently.
+    The DB is the shared persistent store; this dict is local to the process.
+
+    Lifecycle:
+      bootstrap() → try k8s API first, fall back to DB if unavailable.
+      upsert()/remove() → update in-memory dict only (DB writes are the caller's
+      responsibility, handled by crd_watcher._persist_event).
     """
 
     def __init__(self) -> None:
@@ -32,7 +35,7 @@ class ProfileRegistry:
         return f"{namespace}/{name}"
 
     async def bootstrap(self, api: k8s_client.CustomObjectsApi) -> None:
-        """Populate registry from Kubernetes API; fall back to DB on failure."""
+        """Populate registry from Kubernetes API; fall back to DB on k8s failure."""
         try:
             result = api.list_cluster_custom_object(
                 group=CRD_GROUP,
@@ -52,22 +55,29 @@ class ProfileRegistry:
                         item=item.get("metadata", {}).get("name"),
                     )
             logger.info("profile registry bootstrapped from kubernetes", count=len(self._profiles))
-            # Seed DB so subsequent restarts have a warm fallback even if k8s is unavailable.
             await self._seed_db(profiles)
         except Exception:
             logger.exception("failed to bootstrap from kubernetes, falling back to db")
             await self._load_from_db()
 
     async def _seed_db(self, profiles: list[ResourceProfile]) -> None:
-        """Write-through: persist every profile loaded from Kubernetes into DB."""
+        """Write-through: persist Kubernetes profiles to DB for fallback on next restart.
+
+        Uses record_version() which checks content hash before writing — safe to call
+        on every restart from N replicas simultaneously. A hash match produces zero DB
+        writes; the advisory lock prevents concurrent SCD inserts for the same profile.
+        """
         if not profiles:
             return
         try:
             async with get_session() as session:
                 repo = ProfileRepository(session)
+                written = 0
                 for profile in profiles:
-                    await repo.upsert(profile)
-            logger.info("profile registry seeded db", count=len(profiles))
+                    pid = await repo.record_version(profile)
+                    if pid is not None:
+                        written += 1
+            logger.info("profile db seed complete", total=len(profiles), written=written)
         except Exception:
             logger.exception("failed to seed profile db on bootstrap")
 
@@ -76,7 +86,7 @@ class ProfileRegistry:
         try:
             async with get_session() as session:
                 repo = ProfileRepository(session)
-                profiles = await repo.get_all_active()
+                profiles = await repo.get_all_current()
             for profile in profiles:
                 self._profiles[self._key(profile.name, profile.namespace)] = profile
             logger.info("profile registry loaded from db fallback", count=len(profiles))
