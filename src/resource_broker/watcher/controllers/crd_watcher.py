@@ -91,8 +91,6 @@ async def _persist_event(
 
     ADDED/MODIFIED → record_version():
       - Content hash check first: if profile content unchanged, zero DB write.
-      - Advisory lock: if another replica is concurrently writing this profile,
-        this replica skips (returns None). The winning replica handles the write.
       - Only when content actually changed does a new SCD Type 2 row get inserted.
 
     DELETED → soft_expire(): sets is_current=False, valid_to=now().

@@ -65,7 +65,8 @@ class ProfileRegistry:
 
         Uses record_version() which checks content hash before writing — safe to call
         on every restart from N replicas simultaneously. A hash match produces zero DB
-        writes; the advisory lock prevents concurrent SCD inserts for the same profile.
+        writes; the optimistic version column prevents concurrent SCD inserts for the
+        same profile from more than one replica.
         """
         if not profiles:
             return

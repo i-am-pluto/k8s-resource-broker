@@ -175,8 +175,8 @@ Three normalised tables instead of a single JSONB blob:
 
 Two replicas handling the same CRD event simultaneously are safe without table-level locks:
 
-1. **Content hash** — SHA-256 of the canonical profile definition. If the current DB row has the same hash, the write is skipped entirely (idempotent re-delivery).
-2. **Advisory lock** — `pg_try_advisory_xact_lock` keyed by `(namespace, name)`. Returns immediately; the replica that cannot acquire simply skips. The lock is transaction-scoped and auto-released on commit or rollback.
+1. **Content hash** — SHA-256 of the canonical profile definition. If the current DB row has the same hash, the write is skipped entirely — handles watch reconnects and bootstrap re-list with zero DB writes.
+2. **Optimistic version column** — each `resource_profile_versions` row carries a `version` integer (always `1` for a new SCD row). Expiring the current row uses `WHERE is_current = true AND version = $known`. PostgreSQL's row-level locking ensures exactly one replica's `UPDATE` affects 1 row; all others see `rowcount == 0` and skip the insert. No advisory locks or external infrastructure needed.
 
 ### History tracking
 
