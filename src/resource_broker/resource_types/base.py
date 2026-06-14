@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from resource_broker.common.models.patch import PatchOperation
+from resource_broker.common.models.profile import FieldStrategy
 
 
 @dataclass
@@ -21,17 +22,27 @@ def resolve_strategy(strategy: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     rest: dict[str, Any] = {k: v for k, v in strategy.items() if k != "algo"}
 
     if algo == "percentile":
-        transform = rest.pop("transform", "p75")
-        if isinstance(transform, str) and transform.startswith("p"):
-            rest["percentile"] = int(transform[1:])
-        elif isinstance(transform, int):
-            rest["percentile"] = transform
+        if "percentile" not in rest:
+            # Accept the CRD shorthand {"transform": "p90"} in addition to {"percentile": 90}.
+            transform = rest.pop("transform", "p75")
+            rest["percentile"] = int(transform.lstrip("p")) if isinstance(transform, str) else int(transform)
+        else:
+            rest.pop("transform", None)
         return "percentile", rest
 
     if algo == "static":
         return "static", rest
 
     return algo, rest
+
+
+def _strategy_to_dict(s: FieldStrategy | dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalise either a typed FieldStrategy or a legacy raw dict to a plain dict."""
+    if s is None:
+        return None
+    if isinstance(s, FieldStrategy):
+        return s.to_dict()
+    return dict(s)
 
 
 class ResourceType(ABC):
@@ -53,11 +64,13 @@ class ResourceType(ABC):
     async def build_patches(
         self,
         fields: dict[str, Any],
-        strategy: dict[str, Any] | None,
+        strategy: FieldStrategy | dict[str, Any] | None,
         context: dict[str, Any],
     ) -> list[PatchOperation]:
         from resource_broker.algorithms.registry import algorithm_registry
         from resource_broker.common.models.profile import FieldEntry
+
+        profile_strategy_dict = _strategy_to_dict(strategy)
 
         patches: list[PatchOperation] = []
         for field_name, entry in fields.items():
@@ -66,23 +79,24 @@ class ResourceType(ABC):
                 continue
 
             if isinstance(entry, FieldEntry):
-                field_strategy = entry.strategy
+                field_strategy_dict = _strategy_to_dict(entry.strategy)
                 locator = (entry.locator or None) or fd.path
                 field_min = entry.min
                 field_max = entry.max
             else:
-                field_strategy = entry.get("strategy")
+                raw_s = entry.get("strategy")
+                field_strategy_dict = _strategy_to_dict(raw_s)
                 raw_locator = entry.get("locator")
                 locator = (raw_locator or None) or fd.path
                 field_min = entry.get("min")
                 field_max = entry.get("max")
 
-            effective_strategy = field_strategy or strategy
+            effective_strategy = field_strategy_dict or profile_strategy_dict
             if effective_strategy is None:
                 algorithm_name = fd.default_algorithm
                 algo_config: dict[str, Any] = {}
             else:
-                algorithm_name, algo_config = resolve_strategy(dict(effective_strategy))
+                algorithm_name, algo_config = resolve_strategy(effective_strategy)
 
             if field_min is not None:
                 algo_config = {**algo_config, "min": field_min}

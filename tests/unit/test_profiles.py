@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from resource_broker.common.models.profile import FieldEntry, ResourceProfile
+from resource_broker.common.models.profile import FieldEntry, FieldStrategy, ResourceProfile
 
 
 def test_profile_from_crd() -> None:
@@ -22,10 +22,16 @@ def test_profile_from_crd() -> None:
     assert profile.namespace == "default"
     assert profile.resource_type == "k8s-pod"
     assert profile.mode == "recommendation"
-    assert profile.strategy == {"algo": "percentile", "transform": "p75"}
+    # strategy is now a typed FieldStrategy — verify the parsed values, not the raw dict.
+    assert isinstance(profile.strategy, FieldStrategy)
+    assert profile.strategy.algo == "percentile"
+    assert profile.strategy.percentile == 75
     assert len(profile.fields) == 2
     assert profile.fields["cpu_request"].strategy is None
-    assert profile.fields["memory_request"].strategy == {"algo": "static", "value": "512Mi"}
+    mem_s = profile.fields["memory_request"].strategy
+    assert isinstance(mem_s, FieldStrategy)
+    assert mem_s.algo == "static"
+    assert mem_s.value == "512Mi"
 
 
 def test_profile_is_enforce_mode() -> None:
@@ -44,7 +50,7 @@ def test_profile_to_dict() -> None:
         namespace="default",
         resource_type="k8s-pod",
         fields={
-            "cpu_request": FieldEntry(strategy={"algo": "static", "value": "250m"}),
+            "cpu_request": FieldEntry(strategy=FieldStrategy(algo="static", value="250m")),
         },
     )
     d = profile.to_dict()
@@ -52,3 +58,4 @@ def test_profile_to_dict() -> None:
     assert d["resource_type"] == "k8s-pod"
     assert d["mode"] == "recommendation"
     assert "cpu_request" in d["fields"]
+    assert d["fields"]["cpu_request"]["strategy"] == {"algo": "static", "value": "250m"}
