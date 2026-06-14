@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     k8s_in_cluster: bool = True
     k8s_namespace: str = "resource-broker"
     k8s_config_file: Path | None = None
+    watch_namespace: str = ""  # empty = watch all namespaces cluster-wide
 
     # ── Metrics (PromQL backend) ───────────────────────────────────────
     metrics_adapter_type: MetricsAdapterType = MetricsAdapterType.PROMETHEUS

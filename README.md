@@ -173,6 +173,7 @@ All config is via environment variables prefixed `BROKER_`:
 | `BROKER_METRICS_ADAPTER_TYPE` | `prometheus` | `prometheus` / `thanos` / `victoria_metrics` / `mimir` / `kubecost` |
 | `BROKER_METRICS_URL` | `http://prometheus:9090` | Metrics backend URL |
 | `BROKER_K8S_IN_CLUSTER` | `true` | Use in-cluster kubeconfig (`false` = use `~/.kube/config`) |
+| `BROKER_WATCH_NAMESPACE` | *(empty)* | Namespace for the watcher to scope to; empty = cluster-wide |
 | `BROKER_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
 See [`.env.example`](.env.example) for full list.
@@ -214,6 +215,73 @@ kubectl annotate pod my-pod resource-broker/profile=k8s-efficient
 The mutating webhook requires TLS. Set `BROKER_TLS_CERT_FILE` and `BROKER_TLS_KEY_FILE`
 (or use [cert-manager](https://cert-manager.io/) and populate `caBundle` in
 `deploy/resource-broker/mutating-webhook.yaml`).
+
+---
+
+## Namespace scope
+
+By default the watcher runs **cluster-wide** — it calls `list_pod_for_all_namespaces` and
+receives events from every namespace. This requires a `ClusterRole` / `ClusterRoleBinding`
+with `get`, `list`, `watch` on `pods` across all namespaces.
+
+To restrict it to one namespace, set:
+
+```bash
+BROKER_WATCH_NAMESPACE=my-team-ns
+```
+
+When set, the watcher calls `list_namespaced_pod` scoped to that single namespace,
+and the RBAC can be narrowed to a `Role` / `RoleBinding` in that namespace only.
+
+```yaml
+# deploy/resource-broker/deployment.yaml — add to the env block
+- name: BROKER_WATCH_NAMESPACE
+  value: "my-team-ns"
+```
+
+For multiple namespaces you currently need one broker deployment per namespace, each with
+its own `BROKER_WATCH_NAMESPACE`. A multi-namespace label-selector watch is not yet implemented.
+
+| `BROKER_WATCH_NAMESPACE` | Watch scope | RBAC required |
+|--------------------------|-------------|---------------|
+| *(empty, default)*       | All namespaces cluster-wide | `ClusterRole` + `ClusterRoleBinding` |
+| `my-team-ns`             | Single namespace | `Role` + `RoleBinding` in that namespace |
+
+---
+
+## How `watcher.py` works
+
+`PodWatcher` bridges Kubernetes' synchronous watch stream into asyncio.
+
+```
+asyncio event loop (main thread)
+│
+├── collector_task          ← MetricsCollector runs forever (background scrape)
+│
+└── run_in_executor ────────→ _watch_pods() runs in a thread-pool thread
+                                   │
+                                   │ kubernetes.watch.Watch().stream(...)
+                                   │ one blocking iteration per event
+                                   │
+                                   └── run_coroutine_threadsafe(_handle_event)
+                                            ↓ (back on the event loop)
+                                       _handle_event()
+                                           ├── skip if not ADDED or already processed
+                                           ├── find matching ResourceProfile
+                                           ├── compute_patches(profile, pod)
+                                           └── if enforce → _enforce_patches()
+                                                   ├── poll until pod is Ready (up to 30s)
+                                                   ├── try in-place PATCH
+                                                   └── fallback: delete → wait for 404 → recreate
+```
+
+**Key design decisions:**
+
+- **Thread boundary** — `kubernetes.watch` is blocking; running it in `run_in_executor` keeps the asyncio loop free for the collector and async patching calls.
+- **`run_coroutine_threadsafe`** — the only safe way to schedule a coroutine onto the event loop from a non-async thread.
+- **`raw_object`** — the watch stream hands back a typed Python object in `event["object"]`; `raw_object` is the plain dict that code can safely call `.get()` on.
+- **`_PROCESSED_ANNOTATION`** — pods we recreate carry `resource-broker.io/processed: "true"` so the next `ADDED` event for that pod is a no-op, preventing an infinite loop.
+- **Enforce fallback** — in-place resize requires the `InPlacePodVerticalScaling` feature gate (k8s ≥ 1.27, alpha). On a 422 rejection the watcher falls back to delete-and-recreate, mirroring what VPA does in `Recreate` mode. It polls for a 404 before recreating to avoid a 409 "object is being deleted" race.
 
 ---
 

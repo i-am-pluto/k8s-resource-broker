@@ -43,7 +43,7 @@ services:
     command: ["serve", "--port", "8080"]
     environment:
       BROKER_DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker
-      BROKER_PROMETHEUS_URL: http://prometheus:9090
+      BROKER_METRICS_URL: http://prometheus:9090
       BROKER_K8S_IN_CLUSTER: "false"
       BROKER_LOG_LEVEL: DEBUG
       BROKER_ENVIRONMENT: development

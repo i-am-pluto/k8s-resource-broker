@@ -10,8 +10,18 @@ ENV \
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml .
-RUN uv export --no-dev --format=requirements-txt > requirements.txt
+# Copy both pyproject.toml AND uv.lock so uv export uses the pinned versions
+# from the lock file instead of re-resolving (which is non-deterministic and
+# ignores the exact versions committed to the repo).
+COPY pyproject.toml uv.lock ./
+
+# --no-dev          skip test/lint dependencies
+# --no-emit-project exclude the project package itself (k8s-resource-broker)
+#                   from the output. The project is a local directory so pip
+#                   cannot compute a hash for it. All other packages keep their
+#                   hashes, and the project is installed separately in the
+#                   runtime stage via 'pip install -e /app'.
+RUN uv export --no-dev --no-emit-project --format=requirements-txt > requirements.txt
 RUN pip install --no-cache-dir --target=/deps -r requirements.txt
 
 # ── Runtime stage ─────────────────────────────────────────────────────────

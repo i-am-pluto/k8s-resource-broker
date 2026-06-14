@@ -17,7 +17,7 @@ async def run_crd_watch_loop(
     svc: RecommendationService,
 ) -> None:
     """Background task: watch ResourceProfile CRDs, keep registry + cache in sync."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     while True:
         try:
             await loop.run_in_executor(None, _watch_once, api, svc)
