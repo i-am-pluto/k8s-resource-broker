@@ -129,6 +129,69 @@ metadata:
 
 ---
 
+## Profile persistence
+
+Profiles are the source of truth as Kubernetes CRDs. The database acts as a **write-through cache** — every CRD event persists to PostgreSQL so bootstrap can fall back to DB when the Kubernetes API is temporarily unavailable.
+
+### Per-field strategy example
+
+CPU and memory can use completely different algorithms:
+
+```yaml
+spec:
+  strategy:
+    algo: percentile
+    percentile: 90        # profile-level default
+    lookback_hours: 168
+  fields:
+    cpu_request: {}       # inherits profile default (p90)
+    memory_request:
+      strategy:
+        algo: percentile
+        percentile: 75    # memory uses a more conservative percentile
+        lookback_hours: 72
+    cpu_limit:
+      strategy:
+        algo: derived
+        source: cpu_request
+        multiplier: 2.0
+    memory_limit:
+      strategy:
+        algo: static
+        value: "4Gi"
+```
+
+### DB schema (migration 0003)
+
+Three normalised tables instead of a single JSONB blob:
+
+| Table | Purpose |
+|-------|---------|
+| `resource_profile_versions` | SCD Type 2 spine — one row per profile version, never updated in place |
+| `resource_profile_field_strategies` | One row per managed field per version — `algo` + `algo_config` stored separately |
+| `profile_recommendations` | Audit trail linking `profile_id` → patches applied → pod |
+
+### Distributed write safety
+
+Two replicas handling the same CRD event simultaneously are safe without table-level locks:
+
+1. **Content hash** — SHA-256 of the canonical profile definition. If the current DB row has the same hash, the write is skipped entirely — handles watch reconnects and bootstrap re-list with zero DB writes.
+2. **Optimistic version column** — each `resource_profile_versions` row carries a `version` integer (always `1` for a new SCD row). Expiring the current row uses `WHERE is_current = true AND version = $known`. PostgreSQL's row-level locking ensures exactly one replica's `UPDATE` affects 1 row; all others see `rowcount == 0` and skip the insert. No advisory locks or external infrastructure needed.
+
+### History tracking
+
+Old profile versions are never deleted. When a CRD is changed, the current row gets `valid_to = now()` and `is_current = false`; a new row is inserted. This lets you audit which profile version was active when a pod was patched:
+
+```sql
+SELECT v.name, v.namespace, v.valid_from, r.pod_name, r.patches
+FROM profile_recommendations r
+JOIN resource_profile_versions v ON r.profile_id = v.profile_id
+WHERE v.name = 'my-app-profile'
+ORDER BY r.recommended_at DESC;
+```
+
+---
+
 ## Local development
 
 ### Prerequisites
@@ -289,7 +352,7 @@ asyncio event loop (main thread)
 
 This is a working skeleton — the core machinery is in place but several pieces are incomplete:
 
-- [ ] `profiles` repository (`common/dao/repositories/profiles.py`) not yet implemented — profile persistence via DB is missing, currently profiles load from CRD watch only
+- [x] `profiles` repository — SCD Type 2 persistence with normalised field strategies, content-hash idempotency, and `pg_try_advisory_xact_lock` for distributed safety
 - [ ] TLS bootstrap automation (cert-manager integration not wired)
 - [ ] `derived` algorithm formula evaluation is stubbed
 - [ ] Metrics scraper loop needs wiring to the collector service
