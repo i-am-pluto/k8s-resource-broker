@@ -8,7 +8,9 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from resource_broker.config import settings
+# Migrations are orchestrated by the broker-api service/deploy step; performance-monitor
+# and recommender never invoke alembic, only import resource_broker.common.dao.orm_models.
+from resource_broker.common.config import settings
 from resource_broker.common.dao.orm_models import Base
 
 config = context.config

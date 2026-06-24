@@ -46,7 +46,9 @@ db-revision:
 # ── Docker ─────────────────────────────────────────────────────────────────
 
 docker-build:
-	docker build -t k8s-resource-broker:latest .
+	docker build -t resource-broker-api:latest -f Dockerfile.broker-api .
+	docker build -t resource-broker-performance-monitor:latest -f Dockerfile.performance-monitor .
+	docker build -t resource-broker-recommender:latest -f Dockerfile.recommender .
 
 docker-compose-up:
 	docker compose up -d

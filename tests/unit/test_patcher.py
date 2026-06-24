@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from resource_broker.common.models.profile import FieldEntry, ResourceProfile
-from resource_broker.watcher.services.patcher import compute_patches
+from resource_broker.recommender.services.patcher import compute_patches
 
 
 @pytest.mark.asyncio

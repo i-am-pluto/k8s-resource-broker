@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from resource_broker.config import LogLevel, Settings, WebhookMode
+from resource_broker.common.config import LogLevel, Settings, WebhookMode
 
 
 def test_default_settings() -> None:
