@@ -1,33 +1,16 @@
-from __future__ import annotations
+"""TODO: LogAlertSink — concrete AlertSink that emits alerts via structlog.
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any
+The domain models (AlertType, Alert, AlertSink) have moved to
+common/models/alert.py. Only the LogAlertSink implementation remains here.
+"""
+
+from __future__ import annotations
 
 from structlog import get_logger
 
+from resource_broker.common.models.alert import Alert, AlertSink
+
 logger = get_logger(__name__)
-
-
-class AlertType(StrEnum):
-    PRESSURE = "pressure"   # mem_usage/mem_limit >= threshold
-    FAILURE = "failure"     # OOMKilled / FailedScheduling / eviction
-
-
-@dataclass
-class Alert:
-    alert_type: AlertType
-    namespace: str
-    pod_name: str
-    service_name: str | None
-    reason: str
-    details: dict[str, Any] = field(default_factory=dict)
-
-
-class AlertSink(ABC):
-    @abstractmethod
-    async def emit(self, alert: Alert) -> None: ...
 
 
 class LogAlertSink(AlertSink):

@@ -3,23 +3,17 @@ from __future__ import annotations
 import pytest
 import structlog
 
-from resource_broker.performance_monitor.services.alert_sink import (
-    Alert,
-    AlertSink,
-    AlertType,
-    LogAlertSink,
-)
+from resource_broker.common.models.alert import Alert, AlertSink, AlertType
+from resource_broker.performance_monitor.services.alert_sink import LogAlertSink
 
 
 def test_alert_sink_is_abstract() -> None:
-    """AlertSink cannot be instantiated directly (ABC enforcement)."""
     with pytest.raises(TypeError, match="Can't instantiate abstract class"):
-        AlertSink()  # type: ignore
+        AlertSink()
 
 
 @pytest.mark.asyncio
 async def test_log_alert_sink_emit_pressure_alert() -> None:
-    """Test LogAlertSink emits pressure alerts with correct fields."""
     sink = LogAlertSink()
     alert = Alert(
         alert_type=AlertType.PRESSURE,
@@ -47,7 +41,6 @@ async def test_log_alert_sink_emit_pressure_alert() -> None:
 
 @pytest.mark.asyncio
 async def test_log_alert_sink_emit_failure_alert() -> None:
-    """Test LogAlertSink emits failure alerts with correct fields."""
     sink = LogAlertSink()
     alert = Alert(
         alert_type=AlertType.FAILURE,
@@ -75,7 +68,6 @@ async def test_log_alert_sink_emit_failure_alert() -> None:
 
 @pytest.mark.asyncio
 async def test_log_alert_sink_emit_with_none_service_name() -> None:
-    """Test LogAlertSink handles None service_name correctly."""
     sink = LogAlertSink()
     alert = Alert(
         alert_type=AlertType.FAILURE,
@@ -99,7 +91,6 @@ async def test_log_alert_sink_emit_with_none_service_name() -> None:
 
 @pytest.mark.asyncio
 async def test_log_alert_sink_emit_with_empty_details() -> None:
-    """Test LogAlertSink handles empty details dict correctly."""
     sink = LogAlertSink()
     alert = Alert(
         alert_type=AlertType.PRESSURE,
@@ -118,5 +109,4 @@ async def test_log_alert_sink_emit_with_empty_details() -> None:
     assert log_entry["event"] == "performance_monitor_alert"
     assert log_entry["alert_type"] == "pressure"
     assert log_entry["reason"] == "High pressure detected"
-    # Only standard fields should be present when details is empty
     assert "current_usage" not in log_entry

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from resource_broker.common.resource_types.configured_resource import (
+from resource_broker.common.models.configured_resources import (
     ConfiguredResourceRegistry,
     K8sConfiguredResource,
     configured_resource_registry,
@@ -32,7 +32,6 @@ def test_registry_register_custom_type() -> None:
 
     registry.register("custom", CustomConfiguredResource)
     assert registry.get("custom") is CustomConfiguredResource
-    # builtin registry is untouched
     assert configured_resource_registry.list_available() == ["k8s-pod"]
 
 
