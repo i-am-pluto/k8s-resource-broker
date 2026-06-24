@@ -73,16 +73,19 @@ class KubernetesApiAdapter(K8sAdapter):
         restart_count = 0
         last_terminated_reason: str | None = None
         if pod.status.container_statuses:
+            # First pass: sum restart counts from all containers
             for container_status in pod.status.container_statuses:
                 if container_status.restart_count:
                     restart_count += container_status.restart_count
-                # Find the first container with a terminated reason
+            # Second pass: find the first container with a terminated reason
+            for container_status in pod.status.container_statuses:
                 if (
                     container_status.last_state
                     and container_status.last_state.terminated
                     and container_status.last_state.terminated.reason
                 ):
                     last_terminated_reason = container_status.last_state.terminated.reason
+                    break
 
         return PodStatusInfo(
             pod_name=pod_name,

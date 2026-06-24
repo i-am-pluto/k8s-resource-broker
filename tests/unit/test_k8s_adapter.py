@@ -195,6 +195,38 @@ async def test_get_pod_status_multiple_containers(mock_core_api: MagicMock) -> N
 
 
 @pytest.mark.asyncio
+async def test_get_pod_status_multiple_containers_first_terminated_reason(mock_core_api: MagicMock) -> None:
+    """Test that last_terminated_reason picks the FIRST container with a terminated state, not the last.
+
+    Regression test for bug where missing break statement caused the loop to overwrite
+    last_terminated_reason on each match, resulting in the last container's reason instead of first.
+    """
+    first_terminated = MockContainerState(terminated=MockTerminatedState(reason="Error"))
+    second_terminated = MockContainerState(terminated=MockTerminatedState(reason="OOMKilled"))
+
+    mock_pod = MockPod(
+        name="test-pod",
+        namespace="default",
+        phase="Failed",
+        container_statuses=[
+            MockContainerStatus(name="app", restart_count=1, last_state=first_terminated),
+            MockContainerStatus(name="sidecar", restart_count=2, last_state=second_terminated),
+        ],
+    )
+    mock_core_api.read_namespaced_pod.return_value = mock_pod
+
+    with patch("resource_broker.performance_monitor.services.k8s_adapter.create_k8s_api") as mock_create:
+        mock_create.return_value = mock_core_api
+
+        adapter = KubernetesApiAdapter()
+        status = await adapter.get_pod_status("default", "test-pod")
+
+        # Should pick the first container's terminated reason ("Error"), not the second ("OOMKilled")
+        assert status.last_terminated_reason == "Error"
+        assert status.restart_count == 3
+
+
+@pytest.mark.asyncio
 async def test_get_pod_status_no_container_statuses(mock_core_api: MagicMock) -> None:
     """Test pod status when container_statuses is None or empty."""
     mock_pod = MockPod(
