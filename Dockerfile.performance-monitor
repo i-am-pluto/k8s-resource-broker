@@ -40,5 +40,5 @@ USER broker
 # performance-monitor: cron-style metrics scrape loop, no HTTP surface.
 ENTRYPOINT ["python", "-m", "resource_broker.performance_monitor"]
 
-# NOTE: single typer command (scrape) auto-flattens — no subcommand word needed.
-CMD []
+# NOTE: two subcommands now (scrape, run); `run` is the daemon entrypoint.
+CMD ["run"]

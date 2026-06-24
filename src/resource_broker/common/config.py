@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # ── Scraper ──────────────────────────────────────────────────────────
     scraper_interval_seconds: int = 60
     scraper_lookback_minutes: int = 5
+    pressure_threshold: float = 0.85
+    performance_monitor_namespaces: list[str] = []
 
     # ── Profiles ─────────────────────────────────────────────────────────
     default_profile_name: str = "default"
