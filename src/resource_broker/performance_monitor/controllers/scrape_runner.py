@@ -18,8 +18,6 @@ from structlog import get_logger
 from resource_broker.broker_api.services.profile_loader import ProfileLoader
 from resource_broker.common.config import settings
 from resource_broker.common.k8s_client import create_k8s_api
-from resource_broker.performance_monitor.services.collector import MetricsCollector
-from resource_broker.performance_monitor.services.metrics_adapter import MetricsAdapter
 from resource_broker.recommender.services.patcher import compute_patches
 
 logger = get_logger(__name__)
@@ -48,20 +46,14 @@ def _apply_json_patches(obj: dict[str, Any], patches: list[dict[str, Any]]) -> N
 
 
 class PodWatcher:
-    def __init__(self, adapter: MetricsAdapter) -> None:
+    def __init__(self) -> None:
         self._core_api = create_k8s_api(k8s_client.CoreV1Api)
         self._profile_loader = ProfileLoader()
-        self._collector = MetricsCollector(adapter)
 
     async def run(self) -> None:
         logger.info("pod watcher started", watch_namespace=settings.watch_namespace or "<all>")
-        collector_task = asyncio.create_task(self._collector.run_forever())
         loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(None, self._watch_pods, loop)
-        finally:
-            collector_task.cancel()
-            await self._collector._adapter.close()
+        await loop.run_in_executor(None, self._watch_pods, loop)
 
     def _watch_pods(self, loop: asyncio.AbstractEventLoop) -> None:
         w = watch.Watch()
@@ -138,9 +130,7 @@ class PodWatcher:
         for _ in range(15):  # up to 30s (15 × 2s)
             await asyncio.sleep(2)
             try:
-                pod_info = await loop.run_in_executor(
-                    None, self._core_api.read_namespaced_pod, pod_name, pod_namespace
-                )
+                pod_info = await loop.run_in_executor(None, self._core_api.read_namespaced_pod, pod_name, pod_namespace)
             except k8s_client.exceptions.ApiException:
                 logger.info("pod gone before enforcement", pod=pod_name)
                 return
@@ -192,14 +182,10 @@ class PodWatcher:
         spec.pop("nodeName", None)
         spec.pop("hostname", None)
         # Remove the projected service-account token volume — Kubernetes re-injects it.
-        spec["volumes"] = [
-            v for v in spec.get("volumes", [])
-            if not v.get("name", "").startswith(_SA_VOLUME_PREFIX)
-        ]
+        spec["volumes"] = [v for v in spec.get("volumes", []) if not v.get("name", "").startswith(_SA_VOLUME_PREFIX)]
         for container in spec.get("containers", []):
             container["volumeMounts"] = [
-                m for m in container.get("volumeMounts", [])
-                if not m.get("name", "").startswith(_SA_VOLUME_PREFIX)
+                m for m in container.get("volumeMounts", []) if not m.get("name", "").startswith(_SA_VOLUME_PREFIX)
             ]
 
         new_pod: dict[str, Any] = {
@@ -220,9 +206,7 @@ class PodWatcher:
 
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(
-                None, self._core_api.delete_namespaced_pod, pod_name, pod_namespace
-            )
+            await loop.run_in_executor(None, self._core_api.delete_namespaced_pod, pod_name, pod_namespace)
             logger.info("pod deleted for recreation", pod=pod_name)
         except k8s_client.exceptions.ApiException as exc:
             logger.error("failed to delete pod for recreation", pod=pod_name, error=str(exc))
@@ -235,9 +219,7 @@ class PodWatcher:
         for _ in range(30):  # up to 60s
             await asyncio.sleep(2)
             try:
-                await loop.run_in_executor(
-                    None, self._core_api.read_namespaced_pod, pod_name, pod_namespace
-                )
+                await loop.run_in_executor(None, self._core_api.read_namespaced_pod, pod_name, pod_namespace)
                 # Pod still exists (Terminating) — keep waiting
             except k8s_client.exceptions.ApiException as exc:
                 if exc.status == 404:
@@ -250,9 +232,7 @@ class PodWatcher:
             return
 
         try:
-            await loop.run_in_executor(
-                None, self._core_api.create_namespaced_pod, pod_namespace, new_pod
-            )
+            await loop.run_in_executor(None, self._core_api.create_namespaced_pod, pod_namespace, new_pod)
             logger.info(
                 "pod recreated with enforced resources",
                 pod=pod_name,
