@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from structlog import get_logger
 
-from resource_broker.config import settings
+from resource_broker.common.config import settings
 
 logger = get_logger(__name__)
 

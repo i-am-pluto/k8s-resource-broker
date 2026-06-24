@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from resource_broker.algorithms.derived import DerivedAlgorithm
-from resource_broker.algorithms.percentile import _parse_resource_value
-from resource_broker.algorithms.registry import algorithm_registry
-from resource_broker.algorithms.static import StaticAlgorithm
+from resource_broker.recommender.algorithms.derived import DerivedAlgorithm
+from resource_broker.recommender.algorithms.percentile import _parse_resource_value
+from resource_broker.recommender.algorithms.registry import algorithm_registry
+from resource_broker.recommender.algorithms.static import StaticAlgorithm
 
 
 @pytest.mark.asyncio

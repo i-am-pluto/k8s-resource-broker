@@ -5,7 +5,7 @@ import sys
 
 import structlog
 
-from resource_broker.config import settings
+from resource_broker.common.config import settings
 
 
 def configure_logging() -> None:

@@ -7,7 +7,7 @@ from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
 from structlog import get_logger
 
-from resource_broker.config import settings
+from resource_broker.common.config import settings
 
 logger = get_logger(__name__)
 

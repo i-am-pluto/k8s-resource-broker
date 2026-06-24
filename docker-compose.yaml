@@ -35,12 +35,13 @@ services:
       postgres:
         condition: service_healthy
 
-  broker:
+  broker-api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.broker-api
     container_name: broker-api
-    command: ["serve", "--port", "8080"]
+    # single typer command (serve) auto-flattens — no subcommand word
+    command: ["--port", "8080"]
     environment:
       BROKER_DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker
       BROKER_METRICS_URL: http://prometheus:9090
@@ -54,6 +55,42 @@ services:
         condition: service_healthy
       prometheus:
         condition: service_started
+
+  # Cron-style scrape loop (issue #24). No HTTP surface, no port mapping.
+  performance-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.performance-monitor
+    container_name: performance-monitor
+    command: []
+    environment:
+      BROKER_DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker
+      BROKER_METRICS_URL: http://prometheus:9090
+      BROKER_K8S_IN_CLUSTER: "false"
+      BROKER_LOG_LEVEL: DEBUG
+      BROKER_ENVIRONMENT: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+
+  # Cron-style percentile engine + Deployment watch (issue #25). NotImplementedError
+  # until #25 lands — included here for compose-file completeness, not functional yet.
+  recommender:
+    build:
+      context: .
+      dockerfile: Dockerfile.recommender
+    container_name: recommender
+    command: []
+    environment:
+      BROKER_DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker
+      BROKER_K8S_IN_CLUSTER: "false"
+      BROKER_LOG_LEVEL: DEBUG
+      BROKER_ENVIRONMENT: development
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:
