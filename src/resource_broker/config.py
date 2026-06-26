@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     profile_annotation_namespace: str = "resource-broker"
     default_profile_mode: str = "recommendation"
 
+    # ── Background workers ───────────────────────────────────────────────
+    # How often the resync loop re-lists all Profile + Strategy CRDs from the
+    # Kubernetes API to reconcile events missed during watch reconnects.
+    resync_interval_seconds: int = 3600  # 1 hour
+    # How often the periodic check worker ticks to see if any profile's
+    # strategy schedule (run-every) has elapsed.
+    periodic_worker_interval_seconds: int = 60  # 1 minute
+
     # ── TLS (webhook) ────────────────────────────────────────────────────
     tls_cert_file: Path | None = None
     tls_key_file: Path | None = None

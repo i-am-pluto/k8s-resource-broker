@@ -1,0 +1,125 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: strategies.resource-broker.io
+  labels:
+    app.kubernetes.io/name: resource-broker
+spec:
+  group: resource-broker.io
+  names:
+    kind: Strategy
+    listKind: StrategyList
+    plural: strategies
+    singular: strategy
+    shortNames:
+      - strat
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - algo
+              properties:
+
+                algo:
+                  type: string
+                  minLength: 1
+                  pattern: '^[a-z][a-z0-9-]*$'
+                  description: >
+                    Algorithm identifier for this strategy (lowercase alphanumeric + hyphens,
+                    e.g. percentile, static, derived, image).
+                    No CRD-level enum is enforced so that custom algorithms can be registered
+                    in the broker without modifying the CRD. The broker rejects unknown values
+                    at runtime when it cannot find the name in its algorithm registry.
+
+                image:
+                  type: string
+                  nullable: true
+                  description: >
+                    Docker image that implements the strategy runner.
+                    Required when algo=image; ignored for built-in algorithms.
+
+                schedule:
+                  type: object
+                  nullable: true
+                  description: >
+                    Controls how often the background worker re-evaluates pods whose
+                    profiles reference this strategy. Omit to disable periodic re-evaluation.
+                  properties:
+                    run-every:
+                      type: string
+                      description: >
+                        Re-evaluation cadence as a duration string (e.g. "30m", "6h", "1d").
+                        Supported units: s (seconds), m (minutes), h (hours), d (days), w (weeks).
+                        Internally stored and compared at minute granularity.
+                        The background worker re-evaluates all pods whose profile references this
+                        strategy at this interval. When multiple strategies with different schedules
+                        apply to the same profile, the shortest interval wins.
+
+                args:
+                  type: object
+                  description: >
+                    Declared argument schema for this strategy.
+                    Each key is an argument name; the value is its definition (type, enum,
+                    whether it is required, an optional default, and a description).
+                    Actual argument VALUES are not stored here — they are provided by the
+                    Profile that references this Strategy, allowing one Strategy object to
+                    serve many Profiles with different parameterisations.
+                  additionalProperties:
+                    type: object
+                    description: Definition of a single strategy argument.
+                    properties:
+
+                      type:
+                        type: string
+                        enum:
+                          - string
+                          - integer
+                          - number
+                          - boolean
+                        description: >
+                          Expected value type. The broker uses this to coerce and validate
+                          the value supplied by the Profile at runtime.
+
+                      enum:
+                        type: array
+                        items:
+                          x-kubernetes-preserve-unknown-fields: true
+                        description: >
+                          Exhaustive list of allowed values for this argument (any scalar type).
+                          The broker rejects a Profile that supplies a value outside this list.
+
+                      required:
+                        type: boolean
+                        default: false
+                        description: >
+                          When true the broker rejects a Profile that references this
+                          Strategy but does not supply a value for this argument and
+                          has no default to fall back on.
+
+                      default:
+                        x-kubernetes-preserve-unknown-fields: true
+                        description: >
+                          Value used when the referencing Profile omits this argument.
+                          Must be compatible with the declared type.
+
+                      description:
+                        type: string
+                        description: Human-readable explanation of this argument's purpose.
+
+      additionalPrinterColumns:
+        - name: Algo
+          type: string
+          jsonPath: .spec.algo
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

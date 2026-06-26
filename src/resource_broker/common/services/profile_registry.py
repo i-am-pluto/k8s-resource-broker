@@ -6,14 +6,14 @@ from kubernetes import client as k8s_client
 from structlog import get_logger
 
 from resource_broker.common.dao.database import get_session
-from resource_broker.common.dao.repositories.profiles import ProfileRepository
+from resource_broker.common.dao.repositories.profiles import ProfileSnapshotRepository
 from resource_broker.common.models.profile import ResourceProfile
 
 logger = get_logger(__name__)
 
 CRD_GROUP = "resource-broker.io"
 CRD_VERSION = "v1alpha1"
-CRD_PLURAL = "resourceprofiles"
+CRD_PLURAL = "profiles"
 
 
 class ProfileRegistry:
@@ -23,16 +23,18 @@ class ProfileRegistry:
     The DB is the shared persistent store; this dict is local to the process.
 
     Lifecycle:
-      bootstrap() → try k8s API first, fall back to DB if unavailable.
-      upsert()/remove() → update in-memory dict only (DB writes are the caller's
-      responsibility, handled by crd_watcher._persist_event).
+      bootstrap() → k8s API first, profile_snapshots DB fallback if unavailable.
+      upsert()/remove() → update in-memory dict only.
+      DB writes (profile_snapshots) are the caller's responsibility,
+      handled by crd_watcher._persist_event.
     """
 
     def __init__(self) -> None:
         self._profiles: dict[str, ResourceProfile] = {}
 
-    def _key(self, name: str, namespace: str) -> str:
-        return f"{namespace}/{name}"
+    def _key(self, name: str, namespace: str = "") -> str:
+        # CRDs are cluster-scoped — namespace is not part of object identity.
+        return name
 
     async def bootstrap(self, api: k8s_client.CustomObjectsApi) -> None:
         """Populate registry from Kubernetes API; fall back to DB on k8s failure."""
@@ -44,57 +46,59 @@ class ProfileRegistry:
             )
             items = result.get("items") or []
             profiles: list[ResourceProfile] = []
+            raw_crds: list[dict[str, Any]] = []
             for item in items:
                 try:
                     profile = ResourceProfile.from_crd(item)
                     self._profiles[self._key(profile.name, profile.namespace)] = profile
                     profiles.append(profile)
+                    raw_crds.append(item)
                 except Exception:
                     logger.exception(
                         "failed to parse profile during bootstrap",
                         item=item.get("metadata", {}).get("name"),
                     )
             logger.info("profile registry bootstrapped from kubernetes", count=len(self._profiles))
-            await self._seed_db(profiles)
+            await self._seed_db(profiles, raw_crds)
         except Exception:
             logger.exception("failed to bootstrap from kubernetes, falling back to db")
             await self._load_from_db()
 
-    async def _seed_db(self, profiles: list[ResourceProfile]) -> None:
-        """Write-through: persist Kubernetes profiles to DB for fallback on next restart.
+    async def _seed_db(
+        self,
+        profiles: list[ResourceProfile],
+        raw_crds: list[dict[str, Any]],
+    ) -> None:
+        """Write-through: persist current profile state to the snapshot table.
 
-        Uses record_version() which checks content hash before writing — safe to call
-        on every restart from N replicas simultaneously. A hash match produces zero DB
-        writes; the optimistic version column prevents concurrent SCD inserts for the
-        same profile from more than one replica.
+        Hash-gated — safe to call from N replicas simultaneously; no-op if unchanged.
         """
         if not profiles:
             return
         try:
             async with get_session() as session:
-                repo = ProfileRepository(session)
+                snap_repo = ProfileSnapshotRepository(session)
                 written = 0
-                for profile in profiles:
-                    pid = await repo.record_version(profile)
-                    if pid is not None:
+                for raw_crd in raw_crds:
+                    if await snap_repo.upsert(raw_crd):
                         written += 1
             logger.info("profile db seed complete", total=len(profiles), written=written)
         except Exception:
             logger.exception("failed to seed profile db on bootstrap")
 
     async def _load_from_db(self) -> None:
-        """Bootstrap fallback: populate registry from last-known DB state."""
+        """Bootstrap fallback: populate registry from profile_snapshots table."""
         try:
             async with get_session() as session:
-                repo = ProfileRepository(session)
-                profiles = await repo.get_all_current()
+                repo = ProfileSnapshotRepository(session)
+                profiles = await repo.get_all()
             for profile in profiles:
                 self._profiles[self._key(profile.name, profile.namespace)] = profile
             logger.info("profile registry loaded from db fallback", count=len(profiles))
         except Exception:
             logger.exception("failed to load profiles from db; registry starts empty")
 
-    def get(self, name: str, namespace: str = "default") -> ResourceProfile | None:
+    def get(self, name: str, namespace: str = "") -> ResourceProfile | None:
         return self._profiles.get(self._key(name, namespace))
 
     def upsert(self, crd_obj: dict[str, Any]) -> ResourceProfile | None:

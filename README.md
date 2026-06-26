@@ -90,30 +90,37 @@ src/resource_broker/
 
 ## ResourceProfile CRD
 
+Profiles and Strategies are the two CRDs that drive resource recommendations.
+See **[docs/profile-and-strategy.md](docs/profile-and-strategy.md)** for a full explanation
+of how the two CRDs work together, the percentile algorithm, schedules, and the ref+args
+binding model.
+
 ```yaml
 apiVersion: resource-broker.io/v1alpha1
 kind: ResourceProfile
 metadata:
   name: my-app-profile
-  namespace: default
 spec:
   resource-type: k8s-pod
   mode: enforce           # recommendation | enforce
-  strategy:               # default strategy for all fields
-    algo: percentile
-    percentile: 90
-    lookback_hours: 168   # 7 days
+  default-strategy:       # default strategy applied to all fields
+    ref: percentile       # references the "percentile" Strategy CR by name
+    args:
+      percentile-type: p90
+      coolback-period: 168h   # 7-day lookback window
   fields:
-    cpu_request: {}       # use default strategy
+    cpu_request: {}           # inherits default-strategy
     memory_request:
-      strategy:
-        algo: static
-        value: "512Mi"
+      strategy:               # per-field override
+        ref: static
+        args:
+          value: "512Mi"
     cpu_limit:
       strategy:
-        algo: derived
-        source: cpu_request
-        multiplier: 2.0
+        ref: derived
+        args:
+          source-field: /spec/containers/0/resources/requests/cpu
+          transform: {op: mul, operand: 2.0}
     memory_limit:
       min: "256Mi"
       max: "4Gi"
@@ -139,26 +146,30 @@ CPU and memory can use completely different algorithms:
 
 ```yaml
 spec:
-  strategy:
-    algo: percentile
-    percentile: 90        # profile-level default
-    lookback_hours: 168
+  default-strategy:
+    ref: percentile
+    args:
+      percentile-type: p90        # profile-level default
+      coolback-period: 168h       # 7-day lookback
   fields:
-    cpu_request: {}       # inherits profile default (p90)
+    cpu_request: {}               # inherits default (p90, 168h)
     memory_request:
       strategy:
-        algo: percentile
-        percentile: 75    # memory uses a more conservative percentile
-        lookback_hours: 72
+        ref: percentile
+        args:
+          percentile-type: p75    # more conservative for memory
+          coolback-period: 72h
     cpu_limit:
       strategy:
-        algo: derived
-        source: cpu_request
-        multiplier: 2.0
+        ref: derived
+        args:
+          source-field: /spec/containers/0/resources/requests/cpu
+          transform: {op: mul, operand: 2.0}
     memory_limit:
       strategy:
-        algo: static
-        value: "4Gi"
+        ref: static
+        args:
+          value: "4Gi"
 ```
 
 ### DB schema (migration 0003)
@@ -261,8 +272,9 @@ deploys the broker, creates an annotated pod, and asserts it was patched.
 ## Deploying to a real cluster
 
 ```bash
-# Install CRD
-kubectl apply -f deploy/crd/resourceprofile-crd.yaml
+# Install CRDs
+kubectl apply -f deploy/crd/profile-crd.yaml
+kubectl apply -f deploy/crd/strategy-crd.yaml
 
 # Create namespace, RBAC, ConfigMap, Deployment, Service
 kubectl apply -f deploy/namespace.yaml

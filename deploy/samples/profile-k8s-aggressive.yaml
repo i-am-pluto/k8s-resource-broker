@@ -1,0 +1,83 @@
+# Profile CR: k8s-aggressive
+#
+# Profiles are cluster-scoped — no namespace field.
+# Every strategy binding uses "ref" pointing at a cluster-scoped Strategy CR.
+# Arg values are supplied here in the Profile; the Strategy CR only declares
+# which args exist and what types they expect.
+#
+# Apply order:
+#   kubectl apply -f deploy/samples/strategy-percentile-p75.yaml   # Strategy CRs
+#   kubectl apply -f deploy/samples/profile-k8s-aggressive.yaml
+#
+# Pods must carry the annotation to be targeted:
+#   resource-broker.io/profile: k8s-aggressive
+apiVersion: resource-broker.io/v1alpha1
+kind: Profile
+metadata:
+  name: k8s-aggressive
+spec:
+  resource-type: k8s-pod
+  mode: enforce
+
+  # Default strategy for all fields. Points at the cluster-scoped "percentile"
+  # Strategy CR and provides the arg values that Strategy declares.
+  default-strategy:
+    ref: percentile
+    args:
+      percentile-type: p75
+      coolback-period: 168h    # 7-day lookback for the baseline
+
+  fields:
+
+    cpu_request:
+      # No strategy — inherits default-strategy (percentile, p75, 168h).
+      locator: /spec/containers/0/resources/requests/cpu
+      min: "100m"
+      max: "4"
+      max_percentage: 80
+
+    memory_request:
+      # Same Strategy CR ("percentile"), different arg values for this field.
+      strategy:
+        ref: percentile
+        args:
+          percentile-type: p90
+          coolback-period: 24h   # shorter window — memory spikes are bursty
+      locator: /spec/containers/0/resources/requests/memory
+      min: "128Mi"
+      max: "2Gi"
+      max_percentage: 75
+
+    cpu_limit:
+      # p90 for limits gives more headroom than the p75 used for requests.
+      strategy:
+        ref: percentile
+        args:
+          percentile-type: p90
+          coolback-period: 24h
+      locator: /spec/containers/0/resources/limits/cpu
+      min: "200m"
+      max: "8"
+      max_percentage: 90
+
+    memory_limit:
+      # References the "static" Strategy CR with a fixed value.
+      # Use "static" for limits where historical data is not meaningful.
+      strategy:
+        ref: static
+        args:
+          value: "1Gi"
+      locator: /spec/containers/0/resources/limits/memory
+      min: "256Mi"
+      max: "4Gi"
+
+    ephemeral_storage:
+      # References the "static" Strategy CR — ephemeral storage rarely benefits
+      # from percentile sampling.
+      strategy:
+        ref: static
+        args:
+          value: "2Gi"
+      locator: /spec/containers/0/resources/limits/ephemeral-storage
+      min: "512Mi"
+      max: "10Gi"

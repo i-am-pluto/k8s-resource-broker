@@ -14,8 +14,11 @@ from resource_broker.common.k8s_client import create_k8s_api
 from resource_broker.common.logging import configure_logging
 from resource_broker.common.services.profile_registry import ProfileRegistry
 from resource_broker.common.services.recommendation_service import RecommendationService
+from resource_broker.common.services.strategy_registry import StrategyRegistry
 from resource_broker.config import settings
-from resource_broker.watcher.controllers.crd_watcher import run_crd_watch_loop
+from resource_broker.watcher.controllers.crd_watcher import run_crd_watch_loop, run_resync_loop
+from resource_broker.watcher.controllers.periodic_worker import PeriodicCheckWorker
+from resource_broker.watcher.controllers.strategy_watcher import run_strategy_watch_loop
 
 logger = get_logger(__name__)
 
@@ -30,26 +33,62 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("database connected")
 
     # Build stateful services
-    registry = ProfileRegistry()
-    svc = RecommendationService(registry=registry)
+    profile_registry = ProfileRegistry()
+    strategy_registry = StrategyRegistry()
+    svc = RecommendationService(registry=profile_registry)
+
+    background_tasks: list[asyncio.Task] = []
 
     try:
         api = create_k8s_api(k8s_client.CustomObjectsApi)
-        await registry.bootstrap(api)
-        watch_task = asyncio.create_task(run_crd_watch_loop(api, svc))
+
+        # Populate both registries from the Kubernetes API (DB fallback on failure).
+        await profile_registry.bootstrap(api)
+        await strategy_registry.bootstrap(api)
+
+        # Watch streams: Profile CRDs + Strategy CRDs (dual watch).
+        background_tasks.append(asyncio.create_task(
+            run_crd_watch_loop(api, svc),
+            name="profile-crd-watch",
+        ))
+        background_tasks.append(asyncio.create_task(
+            run_strategy_watch_loop(api, strategy_registry, svc),
+            name="strategy-crd-watch",
+        ))
+
+        # Periodic resync: full re-list to catch any events missed during watch reconnects.
+        background_tasks.append(asyncio.create_task(
+            run_resync_loop(api, svc, strategy_registry),
+            name="crd-resync",
+        ))
+
+        # Schedule-driven periodic check worker.
+        periodic_worker = PeriodicCheckWorker(
+            profile_registry=profile_registry,
+            strategy_registry=strategy_registry,
+            recommendation_svc=svc,
+        )
+        background_tasks.append(asyncio.create_task(
+            periodic_worker.run_forever(),
+            name="periodic-check-worker",
+        ))
+
+        logger.info(
+            "kubernetes background tasks started",
+            tasks=[t.get_name() for t in background_tasks],
+        )
     except Exception:
         logger.exception("failed to connect to kubernetes; profile registry disabled")
-        api = None
-        watch_task = None
 
     _app.state.recommendation_svc = svc
+    _app.state.strategy_registry = strategy_registry
 
     yield
 
-    if watch_task is not None:
-        watch_task.cancel()
+    for task in background_tasks:
+        task.cancel()
         try:
-            await watch_task
+            await task
         except asyncio.CancelledError:
             pass
 

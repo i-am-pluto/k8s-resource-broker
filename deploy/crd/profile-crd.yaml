@@ -1,0 +1,155 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: profiles.resource-broker.io
+  labels:
+    app.kubernetes.io/name: resource-broker
+spec:
+  group: resource-broker.io
+  names:
+    kind: Profile
+    listKind: ProfileList
+    plural: profiles
+    singular: profile
+    shortNames:
+      - prof
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - resource-type
+              properties:
+
+                resource-type:
+                  type: string
+                  description: >
+                    The class of object this profile tunes.
+                    Currently "k8s-pod" is the only built-in type.
+
+                mode:
+                  type: string
+                  enum:
+                    - recommendation
+                    - enforce
+                  default: recommendation
+                  description: >
+                    recommendation = log patches only, never mutate the pod.
+                    enforce        = apply JSON patches via the admission webhook.
+
+                default-strategy:
+                  type: object
+                  description: >
+                    Strategy binding applied to every field that does not carry its own
+                    override. "ref" must name a cluster-scoped Strategy CR; "args" supplies
+                    the values for the argument keys that Strategy declares.
+                  required:
+                    - ref
+                  properties:
+
+                    ref:
+                      type: string
+                      minLength: 1
+                      description: Name of a cluster-scoped Strategy CR.
+
+                    args:
+                      type: object
+                      description: >
+                        Argument values for the strategy. Keys must match the argument
+                        names declared in the referenced Strategy CR.
+                        The API server cannot validate these key-value pairs against the
+                        Strategy's declared arg schema at admission time — that validation
+                        happens in the broker at runtime.
+                      x-kubernetes-preserve-unknown-fields: true
+
+                restart-strategy:
+                  type: object
+                  description: >
+                    Optional strategy used when the broker decides a pod must be
+                    restarted to apply changes. Reserved for future use.
+                  x-kubernetes-preserve-unknown-fields: true
+
+                fields:
+                  type: object
+                  description: >
+                    Map of logical field names to their tuning configuration.
+                    Only fields listed here are patched; unlisted fields are left untouched.
+
+                    Well-known field names for resource-type k8s-pod:
+                      cpu_request, memory_request, cpu_limit, memory_limit, ephemeral_storage.
+                  additionalProperties:
+                    type: object
+                    description: Per-field tuning configuration (FieldSpec).
+                    properties:
+
+                      strategy:
+                        type: object
+                        description: >
+                          Strategy binding for this field only. Falls back to
+                          spec.default-strategy when omitted. Same ref + args shape
+                          as spec.default-strategy.
+                        required:
+                          - ref
+                        properties:
+
+                          ref:
+                            type: string
+                            minLength: 1
+                            description: Name of a cluster-scoped Strategy CR.
+
+                          args:
+                            type: object
+                            description: >
+                              Argument values for this field's strategy. Keys must match
+                              the argument names declared in the referenced Strategy CR.
+                              Broker validates at runtime.
+                            x-kubernetes-preserve-unknown-fields: true
+
+                      locator:
+                        type: string
+                        description: >
+                          JSON patch path that identifies where this field lives in the pod spec.
+                          Defaults to the built-in path for well-known field names.
+                          Override when targeting a container index other than 0 or a sidecar.
+
+                      min:
+                        type: string
+                        description: >
+                          Hard lower bound on the computed value (Kubernetes quantity notation).
+                          The broker clamps any recommendation below this value up to min.
+
+                      max:
+                        type: string
+                        description: >
+                          Hard upper bound on the computed value (Kubernetes quantity notation).
+                          The broker clamps any recommendation above this value down to max.
+
+                      max_percentage:
+                        type: integer
+                        minimum: 1
+                        maximum: 100
+                        description: >
+                          Soft upper bound expressed as a percentage of the pod's current value
+                          for this field. The broker caps the recommendation at
+                          min(max, current_value * max_percentage / 100).
+                          Ignored when the pod spec does not already have a value for this field.
+
+      additionalPrinterColumns:
+        - name: ResourceType
+          type: string
+          jsonPath: .spec.resource-type
+        - name: Mode
+          type: string
+          jsonPath: .spec.mode
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
