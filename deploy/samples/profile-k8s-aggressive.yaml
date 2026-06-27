@@ -10,7 +10,7 @@
 #   kubectl apply -f deploy/samples/profile-k8s-aggressive.yaml
 #
 # Pods must carry the annotation to be targeted:
-#   resource-broker.io/profile: k8s-aggressive
+#   resource-broker/profile: k8s-aggressive
 apiVersion: resource-broker.io/v1alpha1
 kind: Profile
 metadata:

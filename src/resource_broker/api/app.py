@@ -78,7 +78,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             tasks=[t.get_name() for t in background_tasks],
         )
     except Exception:
-        logger.exception("failed to connect to kubernetes; profile registry disabled")
+        logger.exception(
+            "failed to connect to kubernetes; falling back to DB for both registries"
+        )
+        # k8s API unavailable — load whatever was last written to the snapshot tables.
+        await profile_registry.load_from_db()
+        await strategy_registry.load_from_db()
 
     _app.state.recommendation_svc = svc
     _app.state.strategy_registry = strategy_registry

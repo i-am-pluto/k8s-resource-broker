@@ -9,11 +9,13 @@ from resource_broker.common.utils import parse_duration_to_hours
 @dataclass
 class FieldStrategy:
     algo: str
-    value: str | None = None            # static
-    percentile: int | None = None       # percentile
-    lookback_hours: float | None = None # percentile (stored as float hours)
-    source_field: str | None = None     # derived
-    multiplier: float | None = None     # derived
+    value: str | None = None             # static
+    percentile: int | None = None        # percentile
+    lookback_hours: float | None = None  # percentile (stored as float hours)
+    source_field: str | None = None      # derived
+    multiplier: float | None = None      # derived
+    transform: str | dict | None = None  # derived: full transform expression preserved
+    extra_args: dict[str, Any] | None = None  # unknown/custom algos: raw args
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FieldStrategy:
@@ -72,10 +74,11 @@ class FieldStrategy:
                 algo="derived",
                 source_field=args.get("source-field"),
                 multiplier=multiplier,
+                transform=transform,
             )
 
-        # Unknown/custom algo registered at runtime — keep algo name, no args
-        return cls(algo=ref)
+        # Unknown/custom algo registered at runtime — preserve all args so round-trips work.
+        return cls(algo=ref, extra_args=dict(args) if args else None)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"algo": self.algo}
@@ -89,6 +92,10 @@ class FieldStrategy:
             d["source"] = self.source_field
         if self.multiplier is not None:
             d["multiplier"] = self.multiplier
+        if self.transform is not None:
+            d["transform"] = self.transform
+        if self.extra_args:
+            d["extra_args"] = self.extra_args
         return d
 
 
@@ -97,6 +104,7 @@ class FieldEntry:
     locator: str | None = None
     min: str | None = None
     max: str | None = None
+    max_percentage: int | None = None
     strategy: FieldStrategy | None = None
 
 
@@ -123,10 +131,12 @@ class ResourceProfile:
         parsed_fields: dict[str, FieldEntry] = {}
         for name, entry in fields_raw.items():
             raw_s = entry.get("strategy")
+            raw_mp = entry.get("max_percentage")
             parsed_fields[name] = FieldEntry(
                 locator=entry.get("locator") or None,
                 min=entry.get("min"),
                 max=entry.get("max"),
+                max_percentage=int(raw_mp) if raw_mp is not None else None,
                 strategy=FieldStrategy.from_dict(raw_s) if raw_s else None,
             )
 
@@ -151,6 +161,7 @@ class ResourceProfile:
                     "locator": entry.locator,
                     "min": entry.min,
                     "max": entry.max,
+                    "max_percentage": entry.max_percentage,
                     "strategy": entry.strategy.to_dict() if entry.strategy else None,
                 }.items() if v is not None}
                 for name, entry in self.fields.items()

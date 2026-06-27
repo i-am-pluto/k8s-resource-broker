@@ -125,7 +125,10 @@ class PeriodicCheckWorker:
         pods = pod_list.items or []
         matched = [
             p for p in pods
-            if (p.metadata.annotations or {}).get(annotation_key) == profile.name
+            if (
+                (p.metadata.labels or {}).get(annotation_key)
+                or (p.metadata.annotations or {}).get(annotation_key)
+            ) == profile.name
         ]
 
         if not matched:

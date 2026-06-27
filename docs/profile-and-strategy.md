@@ -115,7 +115,7 @@ A Profile CR declares:
 
 ```yaml
 apiVersion: resource-broker.io/v1alpha1
-kind: ResourceProfile
+kind: Profile
 metadata:
   name: my-app-profile
 spec:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from kubernetes import client as k8s_client
@@ -27,10 +28,14 @@ class ProfileRegistry:
       upsert()/remove() → update in-memory dict only.
       DB writes (profile_snapshots) are the caller's responsibility,
       handled by crd_watcher._persist_event.
+
+    Thread-safe: a threading.Lock guards all dict mutations and snapshot reads so
+    that executor-thread watch callbacks and event-loop resync tasks never race.
     """
 
     def __init__(self) -> None:
         self._profiles: dict[str, ResourceProfile] = {}
+        self._lock = threading.Lock()
 
     def _key(self, name: str, namespace: str = "") -> str:
         # CRDs are cluster-scoped — namespace is not part of object identity.
@@ -50,7 +55,8 @@ class ProfileRegistry:
             for item in items:
                 try:
                     profile = ResourceProfile.from_crd(item)
-                    self._profiles[self._key(profile.name, profile.namespace)] = profile
+                    with self._lock:
+                        self._profiles[self._key(profile.name, profile.namespace)] = profile
                     profiles.append(profile)
                     raw_crds.append(item)
                 except Exception:
@@ -62,7 +68,7 @@ class ProfileRegistry:
             await self._seed_db(profiles, raw_crds)
         except Exception:
             logger.exception("failed to bootstrap from kubernetes, falling back to db")
-            await self._load_from_db()
+            await self.load_from_db()
 
     async def _seed_db(
         self,
@@ -72,39 +78,46 @@ class ProfileRegistry:
         """Write-through: persist current profile state to the snapshot table.
 
         Hash-gated — safe to call from N replicas simultaneously; no-op if unchanged.
+        Also purges snapshots for profiles that were deleted while the broker was offline
+        so they cannot be resurrected from the snapshot table on a future k8s outage.
         """
-        if not profiles:
-            return
         try:
+            current_names = {
+                raw.get("metadata", {}).get("name", "") for raw in raw_crds
+            }
             async with get_session() as session:
                 snap_repo = ProfileSnapshotRepository(session)
                 written = 0
                 for raw_crd in raw_crds:
                     if await snap_repo.upsert(raw_crd):
                         written += 1
+                await snap_repo.delete_stale(current_names)
             logger.info("profile db seed complete", total=len(profiles), written=written)
         except Exception:
             logger.exception("failed to seed profile db on bootstrap")
 
-    async def _load_from_db(self) -> None:
+    async def load_from_db(self) -> None:
         """Bootstrap fallback: populate registry from profile_snapshots table."""
         try:
             async with get_session() as session:
                 repo = ProfileSnapshotRepository(session)
                 profiles = await repo.get_all()
-            for profile in profiles:
-                self._profiles[self._key(profile.name, profile.namespace)] = profile
+            with self._lock:
+                for profile in profiles:
+                    self._profiles[self._key(profile.name, profile.namespace)] = profile
             logger.info("profile registry loaded from db fallback", count=len(profiles))
         except Exception:
             logger.exception("failed to load profiles from db; registry starts empty")
 
     def get(self, name: str, namespace: str = "") -> ResourceProfile | None:
-        return self._profiles.get(self._key(name, namespace))
+        with self._lock:
+            return self._profiles.get(self._key(name, namespace))
 
     def upsert(self, crd_obj: dict[str, Any]) -> ResourceProfile | None:
         try:
             profile = ResourceProfile.from_crd(crd_obj)
-            self._profiles[self._key(profile.name, profile.namespace)] = profile
+            with self._lock:
+                self._profiles[self._key(profile.name, profile.namespace)] = profile
             logger.debug("profile registry updated", name=profile.name, namespace=profile.namespace)
             return profile
         except Exception:
@@ -112,8 +125,10 @@ class ProfileRegistry:
             return None
 
     def remove(self, name: str, namespace: str) -> None:
-        self._profiles.pop(self._key(name, namespace), None)
+        with self._lock:
+            self._profiles.pop(self._key(name, namespace), None)
         logger.debug("profile removed from registry", name=name, namespace=namespace)
 
     def all_profiles(self) -> list[ResourceProfile]:
-        return list(self._profiles.values())
+        with self._lock:
+            return list(self._profiles.values())

@@ -116,8 +116,11 @@ class PodWatcher:
             logger.exception("unhandled error in pod event handler", event_type=event.get("type"))
 
     async def _find_for_pod(self, pod: dict[str, Any]) -> ResourceProfile | None:
-        annotations = (pod.get("metadata") or {}).get("annotations") or {}
-        profile_name = annotations.get(settings.profile_annotation_key)
+        metadata = (pod.get("metadata") or {})
+        labels = metadata.get("labels") or {}
+        annotations = metadata.get("annotations") or {}
+        # Mirror the admission handler: labels take precedence over annotations.
+        profile_name = labels.get(settings.profile_annotation_key) or annotations.get(settings.profile_annotation_key)
         if not profile_name:
             return None
         loop = asyncio.get_running_loop()

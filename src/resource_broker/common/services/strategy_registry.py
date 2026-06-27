@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from kubernetes import client as k8s_client
@@ -23,10 +24,14 @@ class StrategyRegistry:
       bootstrap() → k8s API first, DB fallback (strategy_snapshots) if unavailable.
       upsert()/remove() → update in-memory dict; DB writes are the watch loop's
       responsibility (see strategy_watcher._persist_strategy_event).
+
+    Thread-safe: a threading.Lock guards all dict mutations and snapshot reads so
+    that executor-thread watch callbacks and event-loop resync tasks never race.
     """
 
     def __init__(self) -> None:
         self._strategies: dict[str, StrategyCRD] = {}
+        self._lock = threading.Lock()
 
     async def bootstrap(self, api: k8s_client.CustomObjectsApi) -> None:
         """Populate the registry from the Kubernetes API, fall back to DB on failure."""
@@ -41,7 +46,8 @@ class StrategyRegistry:
             for item in items:
                 try:
                     strategy = StrategyCRD.from_crd(item)
-                    self._strategies[strategy.name] = strategy
+                    with self._lock:
+                        self._strategies[strategy.name] = strategy
                     pairs.append((strategy, item))
                 except Exception:
                     logger.exception(
@@ -52,40 +58,49 @@ class StrategyRegistry:
             await self._seed_db(pairs)
         except Exception:
             logger.exception("failed to bootstrap strategies from kubernetes, falling back to db")
-            await self._load_from_db()
+            await self.load_from_db()
 
     async def _seed_db(self, pairs: list[tuple[StrategyCRD, dict[str, Any]]]) -> None:
-        if not pairs:
-            return
+        """Write-through: persist current strategy state to the snapshot table.
+
+        Also purges snapshots for strategies deleted while the broker was offline
+        so they cannot be resurrected from the snapshot table on a future k8s outage.
+        """
         try:
+            current_names = {strategy.name for strategy, _ in pairs}
             async with get_session() as session:
                 repo = StrategyRepository(session)
                 written = 0
                 for strategy, raw_crd in pairs:
                     if await repo.upsert(strategy, raw_crd):
                         written += 1
+                await repo.delete_stale(current_names)
             logger.info("strategy db seed complete", total=len(pairs), written=written)
         except Exception:
             logger.exception("failed to seed strategy db on bootstrap")
 
-    async def _load_from_db(self) -> None:
+    async def load_from_db(self) -> None:
+        """Bootstrap fallback: populate registry from strategy_snapshots table."""
         try:
             async with get_session() as session:
                 repo = StrategyRepository(session)
                 strategies = await repo.get_all()
-            for s in strategies:
-                self._strategies[s.name] = s
+            with self._lock:
+                for s in strategies:
+                    self._strategies[s.name] = s
             logger.info("strategy registry loaded from db fallback", count=len(strategies))
         except Exception:
             logger.exception("failed to load strategies from db; strategy registry starts empty")
 
     def get(self, name: str) -> StrategyCRD | None:
-        return self._strategies.get(name)
+        with self._lock:
+            return self._strategies.get(name)
 
     def upsert(self, crd_obj: dict[str, Any]) -> StrategyCRD | None:
         try:
             strategy = StrategyCRD.from_crd(crd_obj)
-            self._strategies[strategy.name] = strategy
+            with self._lock:
+                self._strategies[strategy.name] = strategy
             logger.debug("strategy registry updated", name=strategy.name, algo=strategy.algo)
             return strategy
         except Exception:
@@ -93,8 +108,10 @@ class StrategyRegistry:
             return None
 
     def remove(self, name: str) -> None:
-        self._strategies.pop(name, None)
+        with self._lock:
+            self._strategies.pop(name, None)
         logger.debug("strategy removed from registry", name=name)
 
     def all_strategies(self) -> list[StrategyCRD]:
-        return list(self._strategies.values())
+        with self._lock:
+            return list(self._strategies.values())

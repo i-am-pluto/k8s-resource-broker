@@ -19,7 +19,7 @@ async def create_profile(data: ProfileCreate) -> ProfileResponse:
     api = create_k8s_api(k8s_client.CustomObjectsApi)
     body = {
         "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-        "kind": "ResourceProfile",
+        "kind": "Profile",
         "metadata": {"name": data.name, "namespace": data.namespace},
         "spec": {
             "resource-type": data.resource_type,

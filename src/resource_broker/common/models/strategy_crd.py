@@ -5,7 +5,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from structlog import get_logger
+
 from resource_broker.common.utils import parse_duration_to_minutes
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -69,7 +73,11 @@ class StrategyCRD:
             try:
                 run_every_minutes = parse_duration_to_minutes(raw_re)
             except ValueError:
-                pass
+                logger.warning(
+                    "strategy has unparseable run-every schedule; periodic re-evaluation disabled",
+                    name=metadata.get("name", "unknown"),
+                    raw_value=raw_re,
+                )
 
         return cls(
             name=metadata.get("name", "unknown"),

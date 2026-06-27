@@ -154,8 +154,12 @@ async def _resync_profiles(
         name = meta.get("name", "unknown")
         namespace = meta.get("namespace", "")
         seen.add(name)
+        already_known = svc.registry.get(name) is not None
         profile = svc.registry.upsert(item)
         if profile is not None:
+            if already_known:
+                # Treat as MODIFIED — invalidate stale cached recommendations.
+                svc.invalidate(name, namespace)
             async with get_session() as session:
                 await ProfileSnapshotRepository(session).upsert(item)
     # Expire in-memory entries that have disappeared from the API
@@ -191,8 +195,11 @@ async def _resync_strategies(
     for item in items:
         name = (item.get("metadata") or {}).get("name", "unknown")
         seen.add(name)
+        already_known = strategy_registry.get(name) is not None
         strategy = strategy_registry.upsert(item)
         if strategy is not None:
+            if already_known:
+                _invalidate_for_strategy(name, svc)
             async with get_session() as session:
                 await StrategyRepository(session).upsert(strategy, item)
     for strategy in list(strategy_registry.all_strategies()):

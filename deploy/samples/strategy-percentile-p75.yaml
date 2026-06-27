@@ -20,7 +20,7 @@ spec:
   args:
     percentile-type:
       type: string
-      enum: [p50, p75, p90, p95]
+      enum: [p50, p75, p90, p95, p99]
       required: true
       default: p90
       description: "Which percentile of the lookback window to use as the recommendation."

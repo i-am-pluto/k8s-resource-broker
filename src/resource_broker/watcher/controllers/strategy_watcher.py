@@ -85,8 +85,9 @@ def _handle_strategy_event(
                 _invalidate_for_strategy(name, recommendation_svc)
                 logger.info("strategy modified, cache invalidated", name=name)
         elif event_type == "DELETED":
+            _invalidate_for_strategy(name, recommendation_svc)
             strategy_registry.remove(name)
-            logger.info("strategy deleted, removed from registry", name=name)
+            logger.info("strategy deleted, cache invalidated, removed from registry", name=name)
     except Exception:
         logger.exception("error handling strategy event", event_type=event_type, name=name)
 

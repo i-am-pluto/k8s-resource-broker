@@ -86,9 +86,12 @@ spec:
                           - integer
                           - number
                           - boolean
+                          - object
                         description: >
                           Expected value type. The broker uses this to coerce and validate
                           the value supplied by the Profile at runtime.
+                          Use "object" for structured args (e.g. the derived strategy's
+                          transform arg which accepts {op: mul, operand: 1.5}).
 
                       enum:
                         type: array
