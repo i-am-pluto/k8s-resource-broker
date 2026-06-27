@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "resource-broker-models"
+version = "0.1.0"
+description = "Generated Pydantic models for k8s-resource-broker CRDs"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+]
+
+[project.urls]
+Source = "https://github.com/anomalyco/k8s-resource-broker"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/generated", "src/k8s_resource_broker", "src/performance_monitor", "src/recommender"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.datamodel-codegen]
+input = "openapi/models.yaml"
+output = "src/generated/models.py"
+output-model-type = "pydantic_v2.BaseModel"
+use-annotated = true
+use-double-quotes = true
+field-constraints = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/generated/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
