@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+*.egg
+
+# Tools
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Environment
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Build
+dist/
+build/
+
+# Database
+*.db
+*.sqlite3
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# Session files
+session-*.md
