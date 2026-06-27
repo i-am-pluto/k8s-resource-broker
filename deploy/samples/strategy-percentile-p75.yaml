@@ -1,0 +1,65 @@
+# Strategy CRs are cluster-scoped — no namespace field.
+#
+# Each Strategy CR declares what arguments it accepts (names, types, defaults).
+# Actual argument VALUES are set in the Profile that references the Strategy,
+# so one Strategy CR can serve many Profiles with different parameterisations.
+#
+# Apply: kubectl apply -f deploy/samples/strategy-percentile-p75.yaml
+
+# ── percentile ───────────────────────────────────────────────────────────────
+# Samples a historical-metric percentile over a configurable lookback window.
+# Profiles supply percentile-type and coolback-period per field.
+apiVersion: resource-broker.io/v1alpha1
+kind: Strategy
+metadata:
+  name: percentile
+spec:
+  algo: percentile
+  schedule:
+    run-every: 360m   # Re-evaluate profiled pods every 360 minutes (6 hours)
+  args:
+    percentile-type:
+      type: string
+      enum: [p50, p75, p90, p95, p99]
+      required: true
+      default: p90
+      description: "Which percentile of the lookback window to use as the recommendation."
+    coolback-period:
+      type: string
+      required: false
+      default: "24h"
+      description: "Lookback window over which historical metrics are sampled (e.g. 24h, 7d, 168h)."
+
+---
+# ── static ───────────────────────────────────────────────────────────────────
+# Emits a fixed Kubernetes quantity supplied by the Profile.
+apiVersion: resource-broker.io/v1alpha1
+kind: Strategy
+metadata:
+  name: static
+spec:
+  algo: static
+  # No schedule — static values never need periodic re-evaluation.
+  args:
+    value:
+      required: true
+      description: "Fixed Kubernetes quantity to emit (e.g. 500m, 256Mi, 1.5)."
+
+---
+# ── derived ──────────────────────────────────────────────────────────────────
+# Derives a value from the pod spec through a configurable transform expression.
+apiVersion: resource-broker.io/v1alpha1
+kind: Strategy
+metadata:
+  name: derived
+spec:
+  algo: derived
+  # No schedule — derived values follow current pod spec, not historical metrics.
+  args:
+    source-field:
+      type: string
+      required: true
+      description: "JSONPath into the pod spec to read from, e.g. /spec/containers/0/resources/requests/cpu."
+    transform:
+      required: false
+      description: "Shorthand string (to_string, to_int, to_float) or object {op: mul, operand: 1.5}."

@@ -7,7 +7,7 @@ from structlog import get_logger
 from resource_broker.api.schemas import ProfileCreate, ProfileListResponse, ProfileResponse
 from resource_broker.common.k8s_client import create_k8s_api
 from resource_broker.common.models.profile import ResourceProfile
-from resource_broker.common.services.profile_loader import CRD_GROUP, CRD_PLURAL, CRD_VERSION
+from resource_broker.common.services.profile_registry import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 
 logger = get_logger(__name__)
 
@@ -19,7 +19,7 @@ async def create_profile(data: ProfileCreate) -> ProfileResponse:
     api = create_k8s_api(k8s_client.CustomObjectsApi)
     body = {
         "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-        "kind": "ResourceProfile",
+        "kind": "Profile",
         "metadata": {"name": data.name, "namespace": data.namespace},
         "spec": {
             "resource-type": data.resource_type,

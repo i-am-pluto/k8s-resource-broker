@@ -13,7 +13,20 @@ logger = get_logger(__name__)
 
 
 class PercentileAlgorithm(RecommendationAlgorithm):
-    PERCENTILE_MAP: dict[int, str] = {50: "cpu_p50", 75: "cpu_p75", 90: "cpu_p90", 95: "cpu_p95"}
+    PERCENTILE_MAP: dict[int, str] = {
+        50: "cpu_p50",
+        75: "cpu_p75",
+        90: "cpu_p90",
+        95: "cpu_p95",
+        99: "cpu_p99",
+    }
+    MEM_PERCENTILE_MAP: dict[int, str] = {
+        50: "mem_p50",
+        75: "mem_p75",
+        90: "mem_p90",
+        95: "mem_p95",
+        99: "mem_p99",
+    }
 
     async def compute(
         self,
@@ -33,7 +46,8 @@ class PercentileAlgorithm(RecommendationAlgorithm):
             metrics_repo = MetricsRepository(session)
             percentiles = await metrics_repo.get_percentiles(context["profile_name"], lookback_hours=lookback_hours)
 
-        key = self.PERCENTILE_MAP.get(percentile)
+        pmap = self.MEM_PERCENTILE_MAP if "mem" in field.lower() or "memory" in field.lower() else self.PERCENTILE_MAP
+        key = pmap.get(percentile)
         value = percentiles.get(key) if key else None
 
         if value is None:

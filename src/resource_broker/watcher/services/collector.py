@@ -11,7 +11,7 @@ from resource_broker.common.dao.orm_models import PodMetricModel
 from resource_broker.common.dao.repositories.metrics import MetricsRepository
 from resource_broker.common.k8s_client import create_k8s_api
 from resource_broker.common.services.metrics_adapter import MetricsAdapter
-from resource_broker.common.services.profile_loader import CRD_GROUP, CRD_PLURAL, CRD_VERSION
+from resource_broker.common.services.profile_registry import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from resource_broker.config import settings
 
 logger = get_logger(__name__)

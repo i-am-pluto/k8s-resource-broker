@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import PostgresDsn, model_validator
+from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     profile_annotation_key: str = "resource-broker/profile"
     profile_annotation_namespace: str = "resource-broker"
     default_profile_mode: str = "recommendation"
+
+    # ── Background workers ───────────────────────────────────────────────
+    # How often the resync loop re-lists all Profile + Strategy CRDs from the
+    # Kubernetes API to reconcile events missed during watch reconnects.
+    resync_interval_seconds: int = Field(default=3600, gt=0)
+    periodic_worker_interval_seconds: int = Field(default=60, gt=0)
 
     # ── TLS (webhook) ────────────────────────────────────────────────────
     tls_cert_file: Path | None = None

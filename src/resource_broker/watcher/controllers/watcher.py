@@ -9,8 +9,9 @@ from kubernetes import watch
 from structlog import get_logger
 
 from resource_broker.common.k8s_client import create_k8s_api
+from resource_broker.common.models.profile import ResourceProfile
 from resource_broker.common.services.metrics_adapter import MetricsAdapter
-from resource_broker.common.services.profile_loader import ProfileLoader
+from resource_broker.common.services.profile_registry import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from resource_broker.config import settings
 from resource_broker.watcher.services.collector import MetricsCollector
 from resource_broker.watcher.services.patcher import compute_patches
@@ -43,7 +44,7 @@ def _apply_json_patches(obj: dict[str, Any], patches: list[dict[str, Any]]) -> N
 class PodWatcher:
     def __init__(self, adapter: MetricsAdapter) -> None:
         self._core_api = create_k8s_api(k8s_client.CoreV1Api)
-        self._profile_loader = ProfileLoader()
+        self._custom_api = create_k8s_api(k8s_client.CustomObjectsApi)
         self._collector = MetricsCollector(adapter)
 
     async def run(self) -> None:
@@ -90,7 +91,7 @@ class PodWatcher:
             if _PROCESSED_ANNOTATION in annotations:
                 return
 
-            profile = await self._profile_loader.find_for_pod(obj)
+            profile = await self._find_for_pod(obj)
             if profile is None:
                 return
 
@@ -113,6 +114,30 @@ class PodWatcher:
                 )
         except Exception:
             logger.exception("unhandled error in pod event handler", event_type=event.get("type"))
+
+    async def _find_for_pod(self, pod: dict[str, Any]) -> ResourceProfile | None:
+        metadata = (pod.get("metadata") or {})
+        labels = metadata.get("labels") or {}
+        annotations = metadata.get("annotations") or {}
+        # Mirror the admission handler: labels take precedence over annotations.
+        profile_name = labels.get(settings.profile_annotation_key) or annotations.get(settings.profile_annotation_key)
+        if not profile_name:
+            return None
+        loop = asyncio.get_running_loop()
+        try:
+            crd = await loop.run_in_executor(
+                None,
+                lambda: self._custom_api.get_cluster_custom_object(
+                    group=CRD_GROUP, version=CRD_VERSION, plural=CRD_PLURAL, name=profile_name
+                ),
+            )
+            return ResourceProfile.from_crd(crd)
+        except k8s_client.exceptions.ApiException as exc:
+            if exc.status == 404:
+                logger.warning("profile not found for pod", profile=profile_name)
+            else:
+                logger.error("failed to fetch profile", profile=profile_name, error=str(exc))
+            return None
 
     async def _enforce_patches(
         self,

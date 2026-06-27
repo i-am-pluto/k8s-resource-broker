@@ -90,30 +90,37 @@ src/resource_broker/
 
 ## ResourceProfile CRD
 
+Profiles and Strategies are the two CRDs that drive resource recommendations.
+See **[docs/profile-and-strategy.md](docs/profile-and-strategy.md)** for a full explanation
+of how the two CRDs work together, the percentile algorithm, schedules, and the ref+args
+binding model.
+
 ```yaml
 apiVersion: resource-broker.io/v1alpha1
-kind: ResourceProfile
+kind: Profile
 metadata:
   name: my-app-profile
-  namespace: default
 spec:
   resource-type: k8s-pod
   mode: enforce           # recommendation | enforce
-  strategy:               # default strategy for all fields
-    algo: percentile
-    percentile: 90
-    lookback_hours: 168   # 7 days
+  default-strategy:       # default strategy applied to all fields
+    ref: percentile       # references the "percentile" Strategy CR by name
+    args:
+      percentile-type: p90
+      coolback-period: 168h   # 7-day lookback window
   fields:
-    cpu_request: {}       # use default strategy
+    cpu_request: {}           # inherits default-strategy
     memory_request:
-      strategy:
-        algo: static
-        value: "512Mi"
+      strategy:               # per-field override
+        ref: static
+        args:
+          value: "512Mi"
     cpu_limit:
       strategy:
-        algo: derived
-        source: cpu_request
-        multiplier: 2.0
+        ref: derived
+        args:
+          source-field: /spec/containers/0/resources/requests/cpu
+          transform: {op: mul, operand: 2.0}
     memory_limit:
       min: "256Mi"
       max: "4Gi"
@@ -139,56 +146,51 @@ CPU and memory can use completely different algorithms:
 
 ```yaml
 spec:
-  strategy:
-    algo: percentile
-    percentile: 90        # profile-level default
-    lookback_hours: 168
+  default-strategy:
+    ref: percentile
+    args:
+      percentile-type: p90        # profile-level default
+      coolback-period: 168h       # 7-day lookback
   fields:
-    cpu_request: {}       # inherits profile default (p90)
+    cpu_request: {}               # inherits default (p90, 168h)
     memory_request:
       strategy:
-        algo: percentile
-        percentile: 75    # memory uses a more conservative percentile
-        lookback_hours: 72
+        ref: percentile
+        args:
+          percentile-type: p75    # more conservative for memory
+          coolback-period: 72h
     cpu_limit:
       strategy:
-        algo: derived
-        source: cpu_request
-        multiplier: 2.0
+        ref: derived
+        args:
+          source-field: /spec/containers/0/resources/requests/cpu
+          transform: {op: mul, operand: 2.0}
     memory_limit:
       strategy:
-        algo: static
-        value: "4Gi"
+        ref: static
+        args:
+          value: "4Gi"
 ```
 
-### DB schema (migration 0003)
+### DB schema
 
-Three normalised tables instead of a single JSONB blob:
+Two flat snapshot tables store the last-known CRD state for cold-start fallback:
 
 | Table | Purpose |
 |-------|---------|
-| `resource_profile_versions` | SCD Type 2 spine — one row per profile version, never updated in place |
-| `resource_profile_field_strategies` | One row per managed field per version — `algo` + `algo_config` stored separately |
-| `profile_recommendations` | Audit trail linking `profile_id` → patches applied → pod |
+| `profile_snapshots` | One row per Profile CR — stores the raw CRD as jsonb, hash-gated to avoid no-op writes |
+| `strategy_snapshots` | One row per Strategy CR — same write-through / hash-gated pattern |
 
-### Distributed write safety
+Both tables have a SHA-256 hash column (`profile_hash` / `strategy_hash`) gated by
+`INSERT ... ON CONFLICT DO UPDATE ... WHERE hash != EXCLUDED.hash`, which means:
+- Concurrent replicas handling the same CRD event are safe — one wins, the rest are no-ops.
+- Stale snapshots for CRDs deleted while the broker was offline are purged during bootstrap.
 
-Two replicas handling the same CRD event simultaneously are safe without table-level locks:
+The metrics store lives in a third table:
 
-1. **Content hash** — SHA-256 of the canonical profile definition. If the current DB row has the same hash, the write is skipped entirely — handles watch reconnects and bootstrap re-list with zero DB writes.
-2. **Optimistic version column** — each `resource_profile_versions` row carries a `version` integer (always `1` for a new SCD row). Expiring the current row uses `WHERE is_current = true AND version = $known`. PostgreSQL's row-level locking ensures exactly one replica's `UPDATE` affects 1 row; all others see `rowcount == 0` and skip the insert. No advisory locks or external infrastructure needed.
-
-### History tracking
-
-Old profile versions are never deleted. When a CRD is changed, the current row gets `valid_to = now()` and `is_current = false`; a new row is inserted. This lets you audit which profile version was active when a pod was patched:
-
-```sql
-SELECT v.name, v.namespace, v.valid_from, r.pod_name, r.patches
-FROM profile_recommendations r
-JOIN resource_profile_versions v ON r.profile_id = v.profile_id
-WHERE v.name = 'my-app-profile'
-ORDER BY r.recommended_at DESC;
-```
+| Table | Purpose |
+|-------|---------|
+| `pod_metrics` | Scraped CPU/memory usage rows, used by the `percentile` algorithm |
 
 ---
 
@@ -261,8 +263,9 @@ deploys the broker, creates an annotated pod, and asserts it was patched.
 ## Deploying to a real cluster
 
 ```bash
-# Install CRD
-kubectl apply -f deploy/crd/resourceprofile-crd.yaml
+# Install CRDs
+kubectl apply -f deploy/crd/profile-crd.yaml
+kubectl apply -f deploy/crd/strategy-crd.yaml
 
 # Create namespace, RBAC, ConfigMap, Deployment, Service
 kubectl apply -f deploy/namespace.yaml
@@ -352,9 +355,12 @@ asyncio event loop (main thread)
 
 This is a working skeleton — the core machinery is in place but several pieces are incomplete:
 
-- [x] `profiles` repository — SCD Type 2 persistence with normalised field strategies, content-hash idempotency, and `pg_try_advisory_xact_lock` for distributed safety
-- [ ] TLS bootstrap automation (cert-manager integration not wired)
+- [x] Profile + Strategy CRDs with cluster-scoped snapshot persistence (`profile_snapshots`, `strategy_snapshots`)
+- [x] Hash-gated atomic upserts safe for multi-replica deployments
+- [x] Bootstrap stale-snapshot cleanup (profiles/strategies deleted while offline are purged)
+- [ ] `max_percentage` per-field cap is parsed and stored but not yet applied by the patcher
 - [ ] `derived` algorithm formula evaluation is stubbed
+- [ ] TLS bootstrap automation (cert-manager integration not wired)
 - [ ] Metrics scraper loop needs wiring to the collector service
 - [ ] No Helm chart yet — raw manifests only
 - [ ] API services layer partially stubbed (`api/services/`)
