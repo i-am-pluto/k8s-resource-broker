@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
@@ -28,6 +28,9 @@ class ProfileSnapshotRepository:
     Kubernetes API server is unavailable.  Write-through on every bootstrap
     and watch event; hash-gated to suppress redundant DB writes.
     Profile CRDs are cluster-scoped; namespace is stored as the empty string.
+
+    Rows are never physically deleted.  is_active=False signals a CRD has been
+    removed from Kubernetes; upsert reactivates it if the CRD is re-applied.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -36,10 +39,9 @@ class ProfileSnapshotRepository:
     async def upsert(self, raw_crd: dict[str, Any]) -> bool:
         """Persist or update a profile snapshot.  Returns True when a row was written.
 
-        Uses INSERT ... ON CONFLICT DO UPDATE to avoid a select-then-insert race
-        between concurrent replicas handling the same CRD event.  The WHERE clause
-        on the DO UPDATE skips the write when the stored hash already matches
-        (hash gate preserved, rowcount == 0 means no change).
+        Uses INSERT ... ON CONFLICT DO UPDATE so concurrent replicas never race on
+        first insert.  The DO UPDATE fires when the hash changed OR when the row was
+        previously soft-deleted (is_active=False), reactivating it in one statement.
         """
         metadata = raw_crd.get("metadata", {})
         name = metadata.get("name", "")
@@ -53,6 +55,7 @@ class ProfileSnapshotRepository:
             profile_name=name,
             profile_hash=incoming_hash,
             profile_info=raw_crd,
+            is_active=True,
             updated_at=now,
         )
         do_update = stmt.on_conflict_do_update(
@@ -60,9 +63,14 @@ class ProfileSnapshotRepository:
             set_={
                 "profile_hash": stmt.excluded.profile_hash,
                 "profile_info": stmt.excluded.profile_info,
+                "is_active": True,
                 "updated_at": stmt.excluded.updated_at,
             },
-            where=ProfileSnapshotModel.profile_hash != stmt.excluded.profile_hash,
+            # Update when content changed OR when reactivating a soft-deleted row.
+            where=(
+                (ProfileSnapshotModel.profile_hash != stmt.excluded.profile_hash)
+                | ~ProfileSnapshotModel.is_active
+            ),
         )
         result = await self._session.execute(do_update)
         written = result.rowcount > 0
@@ -71,32 +79,39 @@ class ProfileSnapshotRepository:
         return written
 
     async def remove(self, name: str, namespace: str) -> None:
+        """Soft-delete: set is_active=False rather than removing the row."""
         await self._session.execute(
-            sa_delete(ProfileSnapshotModel).where(
+            sa_update(ProfileSnapshotModel)
+            .where(
                 ProfileSnapshotModel.profile_name == name,
                 ProfileSnapshotModel.namespace == namespace,
             )
+            .values(is_active=False)
         )
-        logger.debug("profile snapshot removed", name=name, namespace=namespace)
+        logger.debug("profile snapshot deactivated", name=name, namespace=namespace)
 
     async def delete_stale(self, current_names: set[str]) -> None:
-        """Remove snapshots for profiles that no longer exist in Kubernetes.
+        """Soft-delete snapshots for profiles no longer present in Kubernetes.
 
-        Called after bootstrap upserts so that profiles deleted while the broker
-        was offline are not resurrected from the snapshot table on the next k8s outage.
+        Called after bootstrap upserts; marks rows inactive so they are not
+        loaded by get_all() on the next k8s outage.
         """
         if not current_names:
-            await self._session.execute(sa_delete(ProfileSnapshotModel))
+            await self._session.execute(
+                sa_update(ProfileSnapshotModel).values(is_active=False)
+            )
             return
         await self._session.execute(
-            sa_delete(ProfileSnapshotModel).where(
-                ProfileSnapshotModel.profile_name.not_in(current_names)
-            )
+            sa_update(ProfileSnapshotModel)
+            .where(ProfileSnapshotModel.profile_name.not_in(current_names))
+            .values(is_active=False)
         )
 
     async def get_all(self) -> list[ResourceProfile]:
-        """Reconstruct all ResourceProfile objects from stored jsonb snapshots."""
-        result = await self._session.execute(select(ProfileSnapshotModel))
+        """Reconstruct active ResourceProfile objects from stored jsonb snapshots."""
+        result = await self._session.execute(
+            select(ProfileSnapshotModel).where(ProfileSnapshotModel.is_active == True)  # noqa: E712
+        )
         rows = result.scalars().all()
         profiles: list[ResourceProfile] = []
         for row in rows:

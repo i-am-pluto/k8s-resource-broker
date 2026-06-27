@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Double, Index, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Double, Index, String, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -47,6 +47,7 @@ class ProfileSnapshotModel(Base):
     profile_name: Mapped[str] = mapped_column(String(253), nullable=False)
     profile_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     profile_info: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -54,6 +55,7 @@ class ProfileSnapshotModel(Base):
     __table_args__ = (
         UniqueConstraint("namespace", "profile_name", name="uq_profile_snapshot"),
         Index("idx_profile_snapshot_name", "profile_name"),
+        Index("idx_profile_snapshot_active", "is_active", "profile_name"),
     )
 
 
@@ -71,6 +73,7 @@ class StrategySnapshotModel(Base):
     strategy_name: Mapped[str] = mapped_column(String(253), nullable=False)
     strategy_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     strategy_info: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -78,4 +81,5 @@ class StrategySnapshotModel(Base):
     __table_args__ = (
         UniqueConstraint("namespace", "strategy_name", name="uq_strategy_snapshot"),
         Index("idx_strategy_snapshot_name", "strategy_name"),
+        Index("idx_strategy_snapshot_active", "is_active", "strategy_name"),
     )
