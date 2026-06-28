@@ -1,0 +1,89 @@
+# Profile CR: api-service-profile
+#
+# Example profile for a typical API service.
+# Demonstrates mixing p50, p75, and p99 strategies across fields:
+#
+#   Requests  → percentile-p75  (generous enough to avoid throttling, not wasteful)
+#   Limits    → percentile-p99  (near-max observed; only 1% of historical spikes exceed this)
+#   Storage   → static          (ephemeral storage has no meaningful usage metric)
+#
+# Apply order:
+#   1. kubectl apply -f k8s-crd/crds/resource-type-crd.yaml
+#   2. kubectl apply -f k8s-crd/crds/strategy-crd.yaml
+#   3. kubectl apply -f k8s-crd/crds/profile-crd.yaml
+#   4. kubectl apply -f k8s-crd/samples/resource-types/k8s-pod.yaml
+#   5. kubectl apply -f k8s-crd/samples/strategies/
+#   6. kubectl apply -f k8s-crd/samples/profiles/api-service-profile.yaml
+#
+# Then annotate pods to opt in:
+#   kubectl label pod <pod-name> resource-broker/profile=api-service-profile
+#   # or via the annotation fallback:
+#   kubectl annotate pod <pod-name> resource-broker/profile=api-service-profile
+apiVersion: resource-broker.io/v1alpha1
+kind: Profile
+metadata:
+  name: api-service-profile
+spec:
+  resource-type-ref: k8s-pod       # references the k8s-pod ResourceType CR
+  mode: enforce                     # recommendation | enforce
+
+  # Default strategy for all fields unless overridden below.
+  # percentile-p75 with a 7-day lookback is a solid baseline for requests.
+  default-strategy:
+    ref: percentile-p75
+    args:
+      coolback-period: "168h"       # 7-day lookback — smooths short-lived spikes
+
+  fields:
+
+    # ── CPU request ─────────────────────────────────────────────────────────────
+    cpu_request:
+      # Inherits default-strategy: percentile-p75, 168h lookback.
+      min: "100m"
+      max: "4"
+      max_percentage: 80           # cap at 80% of the current configured request
+
+    # ── Memory request ──────────────────────────────────────────────────────────
+    memory_request:
+      # Memory spikes are more bursty than CPU — use a shorter lookback
+      # so the p75 tracks recent behavior rather than old baselines.
+      strategy:
+        ref: percentile-p75
+        args:
+          coolback-period: "24h"   # 1-day lookback for memory requests
+      min: "128Mi"
+      max: "2Gi"
+      max_percentage: 85
+
+    # ── CPU limit ────────────────────────────────────────────────────────────────
+    cpu_limit:
+      # Use p99 for limits: CPU throttling on <1% of historical samples is acceptable.
+      # Tighter 24h window keeps limits reactive to recent traffic peaks.
+      strategy:
+        ref: percentile-p99
+        args:
+          coolback-period: "24h"
+      min: "200m"
+      max: "8"
+
+    # ── Memory limit ─────────────────────────────────────────────────────────────
+    memory_limit:
+      # p99 for memory limits: OOM kills should be exceedingly rare.
+      # 72h gives enough signal to cover weekly patterns (e.g. Monday spikes).
+      strategy:
+        ref: percentile-p99
+        args:
+          coolback-period: "72h"
+      min: "256Mi"
+      max: "4Gi"
+
+    # ── Ephemeral storage ────────────────────────────────────────────────────────
+    ephemeral_storage:
+      # Ephemeral storage has no reliable usage metric — use a fixed value.
+      # Adjust the static value to match your service's known log/tmp footprint.
+      strategy:
+        ref: static
+        args:
+          value: "2Gi"
+      min: "512Mi"
+      max: "10Gi"

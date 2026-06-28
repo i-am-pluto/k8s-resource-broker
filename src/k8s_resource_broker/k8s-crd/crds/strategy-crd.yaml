@@ -1,0 +1,125 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: strategies.resource-broker.io
+  labels:
+    app.kubernetes.io/name: resource-broker
+    app.kubernetes.io/component: crd
+spec:
+  group: resource-broker.io
+  names:
+    kind: Strategy
+    listKind: StrategyList
+    plural: strategies
+    singular: strategy
+    shortNames:
+      - strat
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - algo
+              properties:
+
+                algo:
+                  type: string
+                  minLength: 1
+                  pattern: '^[a-z][a-z0-9-]*$'
+                  description: >
+                    Algorithm identifier (e.g. percentile, static, derived, image).
+                    No enum enforced — custom algorithms can be registered at runtime.
+
+                image:
+                  type: string
+                  nullable: true
+                  description: >
+                    Docker image implementing the strategy runner.
+                    Required when algo=image; ignored for built-in algorithms.
+
+                schedule:
+                  type: object
+                  nullable: true
+                  description: >
+                    Controls how often the background worker re-evaluates pods whose
+                    profiles reference this strategy. Omit to disable periodic scheduling.
+                  properties:
+                    run-every:
+                      type: string
+                      description: >
+                        Re-evaluation cadence as a duration string.
+                        Supported units: s, m, h, d, w  (e.g. "30m", "6h", "1d").
+                        Internally normalised to minutes. When multiple strategies with
+                        different schedules apply to the same profile, the shortest wins.
+
+                args:
+                  type: object
+                  description: >
+                    Declared argument schema for this strategy.
+                    Keys are argument names; values are their definitions (type, enum,
+                    required flag, default, description).
+                    Actual VALUES are supplied by the Profile that references this Strategy —
+                    one Strategy can serve many Profiles with different parameterisations.
+                  additionalProperties:
+                    type: object
+                    description: Definition of a single strategy argument.
+                    properties:
+
+                      type:
+                        type: string
+                        enum:
+                          - string
+                          - integer
+                          - number
+                          - boolean
+                          - object
+                        description: >
+                          Expected value type used by the broker to coerce and validate
+                          the value supplied by a referencing Profile at runtime.
+                          Use "object" for structured args
+                          (e.g. derived strategy's transform: {op: mul, operand: 1.5}).
+
+                      enum:
+                        type: array
+                        items:
+                          x-kubernetes-preserve-unknown-fields: true
+                        description: >
+                          Exhaustive list of valid values for this argument.
+                          The broker rejects a Profile that supplies a value outside this list.
+
+                      required:
+                        type: boolean
+                        default: false
+                        description: >
+                          When true the broker rejects any referencing Profile that omits
+                          this argument and has no default to fall back on.
+
+                      default:
+                        x-kubernetes-preserve-unknown-fields: true
+                        description: >
+                          Value used when the referencing Profile omits this argument.
+                          Must be compatible with the declared type.
+
+                      description:
+                        type: string
+                        description: Human-readable explanation of the argument's purpose.
+
+      additionalPrinterColumns:
+        - name: Algo
+          type: string
+          jsonPath: .spec.algo
+        - name: Schedule
+          type: string
+          jsonPath: .spec.schedule.run-every
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

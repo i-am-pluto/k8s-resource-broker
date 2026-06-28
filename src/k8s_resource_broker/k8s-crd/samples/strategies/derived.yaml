@@ -1,0 +1,34 @@
+# Strategy CR: derived
+#
+# Derives a field value from another field in the pod spec via a transform.
+# Use when one field is logically a function of another — e.g. cpu_limit = 2× cpu_request.
+#
+# The transform arg can be:
+#   - A string shorthand: "to_string", "to_int", "to_float"  (type coercion, no scaling)
+#   - A structured object: {op: mul, operand: N}             (multiplication by N)
+#
+# No schedule — derived values follow the current pod spec, not historical metrics.
+apiVersion: resource-broker.io/v1alpha1
+kind: Strategy
+metadata:
+  name: derived
+spec:
+  algo: derived
+  args:
+    source-field:
+      type: string
+      required: true
+      description: >
+        JSON Patch path into the pod spec to read the source value from.
+        The broker reads this path from the live pod spec at evaluation time.
+        Example: /spec/containers/0/resources/requests/cpu
+    transform:
+      type: object
+      required: false
+      description: >
+        Transform expression applied to the source value before writing.
+        String shorthands: "to_string", "to_int", "to_float" (type coercion only).
+        Structured object: {op: mul, operand: <number>}
+          op=mul multiplies the source value by operand.
+          Example: {op: mul, operand: 2.0} → limit = 2× request.
+        Omit to copy the source value unchanged.

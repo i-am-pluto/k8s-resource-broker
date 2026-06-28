@@ -1,0 +1,158 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: profiles.resource-broker.io
+  labels:
+    app.kubernetes.io/name: resource-broker
+    app.kubernetes.io/component: crd
+spec:
+  group: resource-broker.io
+  names:
+    kind: Profile
+    listKind: ProfileList
+    plural: profiles
+    singular: profile
+    shortNames:
+      - prof
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - resource-type-ref
+              description: >
+                A Profile ties together a ResourceType (what to patch) and one or more
+                Strategy references (how to compute each field value).
+                The resource-type-ref names a cluster-scoped ResourceType CR;
+                each strategy ref names a cluster-scoped Strategy CR.
+              properties:
+
+                resource-type-ref:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Name of the cluster-scoped ResourceType CR that this profile targets.
+                    The ResourceType defines the fields available for tuning and their
+                    default patch locators and metric queries.
+                    Example: k8s-pod
+
+                mode:
+                  type: string
+                  enum:
+                    - recommendation
+                    - enforce
+                  default: recommendation
+                  description: >
+                    recommendation = compute and log patches only, never mutate the resource.
+                    enforce        = apply computed patches via the admission webhook or watcher.
+
+                default-strategy:
+                  type: object
+                  required:
+                    - ref
+                  description: >
+                    Strategy binding applied to every field that does not carry its own override.
+                    "ref" must name a cluster-scoped Strategy CR; "args" supplies the argument
+                    values that Strategy declares. The broker validates args at runtime.
+                  properties:
+                    ref:
+                      type: string
+                      minLength: 1
+                      description: Name of a cluster-scoped Strategy CR.
+                    args:
+                      type: object
+                      description: >
+                        Argument values for the strategy. Keys must match the argument
+                        names declared in the referenced Strategy CR. Values can be any
+                        type (string, number, boolean, or structured object).
+                        The API server cannot validate these against the Strategy schema at
+                        admission time — that happens in the broker at runtime.
+                      x-kubernetes-preserve-unknown-fields: true
+
+                fields:
+                  type: object
+                  description: >
+                    Per-field tuning configuration. Only fields listed here are patched;
+                    unlisted fields are left untouched.
+
+                    Field names must correspond to fields declared in the referenced
+                    ResourceType CR. Well-known names for resource-type-ref=k8s-pod:
+                      cpu_request, memory_request, cpu_limit, memory_limit, ephemeral_storage
+                  additionalProperties:
+                    type: object
+                    description: Per-field tuning override (FieldSpec).
+                    properties:
+
+                      strategy:
+                        type: object
+                        required:
+                          - ref
+                        description: >
+                          Strategy binding for this field only. Overrides default-strategy.
+                          Omit to inherit default-strategy for this field.
+                        properties:
+                          ref:
+                            type: string
+                            minLength: 1
+                            description: Name of a cluster-scoped Strategy CR.
+                          args:
+                            type: object
+                            description: >
+                              Argument values for this field's strategy.
+                              Broker validates at runtime against the Strategy's arg schema.
+                            x-kubernetes-preserve-unknown-fields: true
+
+                      locator:
+                        type: string
+                        description: >
+                          JSON Patch path override for this field in the resource spec.
+                          Omit to use the defaultLocator from the ResourceType definition.
+                          Use when targeting a container index other than 0 or a sidecar.
+                          Example: /spec/containers/1/resources/requests/cpu
+
+                      min:
+                        type: string
+                        description: >
+                          Hard lower bound (Kubernetes quantity notation).
+                          The broker clamps any computed value below this to min.
+                          Example: "100m", "128Mi"
+
+                      max:
+                        type: string
+                        description: >
+                          Hard upper bound (Kubernetes quantity notation).
+                          The broker clamps any computed value above this to max.
+                          Example: "4", "2Gi"
+
+                      max_percentage:
+                        type: integer
+                        minimum: 1
+                        maximum: 100
+                        description: >
+                          Soft upper bound as a percentage of the pod's current configured value.
+                          The broker caps the recommendation at min(max, current * max_percentage / 100).
+                          Ignored when the resource spec does not already declare a value for this field.
+                          Example: 80 (cap at 80% of current setting)
+
+      additionalPrinterColumns:
+        - name: ResourceType
+          type: string
+          jsonPath: .spec.resource-type-ref
+        - name: Mode
+          type: string
+          jsonPath: .spec.mode
+        - name: Strategy
+          type: string
+          jsonPath: .spec.default-strategy.ref
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
