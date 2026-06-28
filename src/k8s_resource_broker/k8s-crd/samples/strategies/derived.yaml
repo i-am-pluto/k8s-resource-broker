@@ -23,7 +23,6 @@ spec:
         The broker reads this path from the live pod spec at evaluation time.
         Example: /spec/containers/0/resources/requests/cpu
     transform:
-      type: object
       required: false
       description: >
         Transform expression applied to the source value before writing.

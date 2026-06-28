@@ -68,6 +68,9 @@ spec:
                               How to query actual consumption of this resource field.
                               Either metric + label_map (broker builds PromQL) or
                               query (full PromQL expression, used as-is).
+                            x-kubernetes-validations:
+                              - rule: "has(self.metric) || has(self.query)"
+                                message: "either metric or query must be specified"
                             properties:
                               metric:
                                 type: string
@@ -89,7 +92,8 @@ spec:
                                   Maps Prometheus label names to Kubernetes metadata field names
                                   (namespace, pod_name, container_name) or static string values.
                                   Used with metric; ignored when query is set.
-                                x-kubernetes-preserve-unknown-fields: true
+                                additionalProperties:
+                                  type: string
 
                           configured:
                             type: object
@@ -97,6 +101,9 @@ spec:
                               How to query the currently configured value (limit or request)
                               for this field. Used by strategies that need to reason about
                               the current setting (e.g. derived, max_percentage clamping).
+                            x-kubernetes-validations:
+                              - rule: "has(self.metric) || has(self.query)"
+                                message: "either metric or query must be specified"
                             properties:
                               metric:
                                 type: string
@@ -113,7 +120,8 @@ spec:
                                 type: object
                                 description: >
                                   Label-to-metadata mapping for the configured-value query.
-                                x-kubernetes-preserve-unknown-fields: true
+                                additionalProperties:
+                                  type: string
 
       additionalPrinterColumns:
         - name: Fields

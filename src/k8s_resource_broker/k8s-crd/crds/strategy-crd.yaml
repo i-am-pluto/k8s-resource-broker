@@ -45,6 +45,9 @@ spec:
                   description: >
                     Docker image implementing the strategy runner.
                     Required when algo=image; ignored for built-in algorithms.
+                x-kubernetes-validations:
+                  - rule: "self.algo != 'image' || has(self.image)"
+                    message: "spec.image is required when spec.algo is 'image'"
 
                 schedule:
                   type: object
@@ -53,13 +56,16 @@ spec:
                     Controls how often the background worker re-evaluates pods whose
                     profiles reference this strategy. Omit to disable periodic scheduling.
                   properties:
-                    run-every:
+                    cron:
                       type: string
+                      pattern: '^(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)$'
                       description: >
-                        Re-evaluation cadence as a duration string.
-                        Supported units: s, m, h, d, w  (e.g. "30m", "6h", "1d").
-                        Internally normalised to minutes. When multiple strategies with
-                        different schedules apply to the same profile, the shortest wins.
+                        Re-evaluation cadence as a standard 5-field cron expression
+                        (minute hour day-of-month month day-of-week).
+                        Examples: "0 */6 * * *" (every 6 h), "0 */3 * * *" (every 3 h),
+                        "*/30 * * * *" (every 30 min).
+                        When multiple strategies with different schedules apply to the
+                        same profile, the shortest interval wins.
 
                 args:
                   type: object
@@ -119,7 +125,7 @@ spec:
           jsonPath: .spec.algo
         - name: Schedule
           type: string
-          jsonPath: .spec.schedule.run-every
+          jsonPath: .spec.schedule['cron']
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

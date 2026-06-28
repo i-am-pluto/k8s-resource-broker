@@ -58,6 +58,12 @@ components:
         image:
           type: string
           description: Docker image for the strategy runner (algo=image only).
+        cron:
+          type: string
+          description: >
+            Re-evaluation schedule as a 5-field cron expression (from spec.schedule.cron).
+            Null when no schedule is configured on the Strategy.
+          example: "0 */6 * * *"
         args_schema:
           type: object
           description: Parsed argument schema keyed by argument name.

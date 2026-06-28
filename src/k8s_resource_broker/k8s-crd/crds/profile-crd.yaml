@@ -146,13 +146,13 @@ spec:
       additionalPrinterColumns:
         - name: ResourceType
           type: string
-          jsonPath: .spec.resource-type-ref
+          jsonPath: .spec['resource-type-ref']
         - name: Mode
           type: string
           jsonPath: .spec.mode
         - name: Strategy
           type: string
-          jsonPath: .spec.default-strategy.ref
+          jsonPath: .spec['default-strategy'].ref
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
