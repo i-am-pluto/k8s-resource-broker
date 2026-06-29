@@ -1,0 +1,133 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: resourcetypes.resource-broker.io
+  labels:
+    app.kubernetes.io/name: resource-broker
+    app.kubernetes.io/component: crd
+spec:
+  group: resource-broker.io
+  names:
+    kind: ResourceType
+    listKind: ResourceTypeList
+    plural: resourcetypes
+    singular: resourcetype
+    shortNames:
+      - rt
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - fields
+              description: >
+                Defines the set of tunable fields for a class of Kubernetes resource
+                (e.g. k8s-pod, k8s-node).  Each field entry carries the default JSON
+                patch locator and optional PromQL metric queries so the broker knows
+                how to read current usage and configured values without extra config.
+              properties:
+
+                fields:
+                  type: object
+                  description: >
+                    Map of logical field names to their definition.
+                    Logical names (e.g. cpu_request, memory_limit) are what Profiles
+                    reference; the ResourceType translates them to patch paths and metrics.
+                  additionalProperties:
+                    type: object
+                    description: Definition of a single tunable field.
+                    properties:
+
+                      defaultLocator:
+                        type: string
+                        description: >
+                          Default JSON Patch path to this field in the resource spec.
+                          Profiles may override this per-field via spec.fields[name].locator.
+                          Example: /spec/containers/0/resources/requests/cpu
+
+                      metrics:
+                        type: object
+                        description: >
+                          Optional metric query configuration for this field.
+                          Omit to use broker cadvisor defaults.
+                          Both usage and configured are independently optional.
+                        properties:
+
+                          usage:
+                            type: object
+                            description: >
+                              How to query actual consumption of this resource field.
+                              Either metric + label_map (broker builds PromQL) or
+                              query (full PromQL expression, used as-is).
+                            x-kubernetes-validations:
+                              - rule: "has(self.metric) || has(self.query)"
+                                message: "either metric or query must be specified"
+                            properties:
+                              metric:
+                                type: string
+                                description: >
+                                  Raw Prometheus metric name.
+                                  The broker constructs the PromQL expression from this
+                                  name and the label_map filters.
+                                  Example: container_cpu_usage_seconds_total
+                              query:
+                                type: string
+                                description: >
+                                  Full PromQL expression. Takes precedence over metric + label_map
+                                  when both are specified. Supports $namespace, $pod, $container
+                                  placeholders that the broker substitutes at query time.
+                                  Example: 'sum(rate(container_cpu_usage_seconds_total{namespace="$namespace",pod="$pod"}[5m]))'
+                              label_map:
+                                type: object
+                                description: >
+                                  Maps Prometheus label names to Kubernetes metadata field names
+                                  (namespace, pod_name, container_name) or static string values.
+                                  Used with metric; ignored when query is set.
+                                additionalProperties:
+                                  type: string
+
+                          configured:
+                            type: object
+                            description: >
+                              How to query the currently configured value (limit or request)
+                              for this field. Used by strategies that need to reason about
+                              the current setting (e.g. derived, max_percentage clamping).
+                            x-kubernetes-validations:
+                              - rule: "has(self.metric) || has(self.query)"
+                                message: "either metric or query must be specified"
+                            properties:
+                              metric:
+                                type: string
+                                description: >
+                                  Raw Prometheus metric name for the configured value.
+                                  Example: kube_pod_container_resource_requests
+                              query:
+                                type: string
+                                description: >
+                                  Full PromQL expression for the configured value.
+                                  Supports $namespace, $pod, $container, $resource placeholders.
+                                  Example: 'kube_pod_container_resource_requests{resource="cpu",namespace="$namespace",pod="$pod"}'
+                              label_map:
+                                type: object
+                                description: >
+                                  Label-to-metadata mapping for the configured-value query.
+                                additionalProperties:
+                                  type: string
+
+      additionalPrinterColumns:
+        - name: Fields
+          type: string
+          jsonPath: .metadata.annotations['resource-broker\.io/field-count']
+          description: Number of tunable fields defined.
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

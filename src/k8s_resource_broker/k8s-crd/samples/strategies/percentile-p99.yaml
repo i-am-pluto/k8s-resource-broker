@@ -1,0 +1,32 @@
+# Strategy CR: percentile-p99
+#
+# Uses the 99th percentile of historical usage as the recommendation.
+# Near-maximum observed usage — only 1% of historical samples exceeded this value.
+# Ideal for setting resource limits and for latency-sensitive or SLA-critical services
+# where CPU throttling or OOM kills are unacceptable.
+#
+# Default lookback: 24 hours — a tighter window keeps limits reactive to peak patterns.
+# For limits, shorter windows are preferable to longer ones so limits track real spikes.
+apiVersion: resource-broker.io/v1alpha1
+kind: Strategy
+metadata:
+  name: percentile-p99
+spec:
+  algo: percentile
+  args:
+    percentile-type:
+      type: string
+      enum: [p50, p75, p90, p95, p99]
+      required: false
+      default: p99
+      description: >
+        Which percentile of the lookback window to target.
+        Defaults to p99; Profiles may override to any listed value.
+    coolback-period:
+      type: string
+      required: false
+      default: "24h"
+      description: >
+        Lookback window for historical metric sampling.
+        Shorter window keeps limits reactive to recent peak activity.
+        Common values: 24h (1 day), 72h (3 days), 168h (7 days).

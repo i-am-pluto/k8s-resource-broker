@@ -1,0 +1,20 @@
+# Strategy CR: static
+#
+# Emits a fixed Kubernetes quantity supplied by the referencing Profile.
+# Use for fields where historical metrics are not meaningful — e.g. ephemeral
+# storage limits, sidecar memory limits with known bounds, init containers.
+#
+# No schedule — static values never need periodic re-evaluation.
+apiVersion: resource-broker.io/v1alpha1
+kind: Strategy
+metadata:
+  name: static
+spec:
+  algo: static
+  args:
+    value:
+      type: string
+      required: true
+      description: >
+        Fixed Kubernetes quantity to emit (e.g. "500m", "256Mi", "2Gi", "1.5").
+        The broker writes this value verbatim to the field's patch locator.

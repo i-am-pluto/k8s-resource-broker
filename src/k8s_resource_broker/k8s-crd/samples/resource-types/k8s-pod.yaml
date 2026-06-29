@@ -1,0 +1,81 @@
+# ResourceType CR: k8s-pod
+#
+# Defines the tunable fields for Kubernetes pods and the PromQL queries
+# the broker uses to read current usage and configured values.
+#
+# Apply first — Profiles reference this CR by name via resource-type-ref.
+#   kubectl apply -f k8s-crd/crds/resource-type-crd.yaml
+#   kubectl apply -f k8s-crd/samples/resource-types/k8s-pod.yaml
+apiVersion: resource-broker.io/v1alpha1
+kind: ResourceType
+metadata:
+  name: k8s-pod
+  annotations:
+    resource-broker.io/field-count: "5"
+spec:
+  fields:
+
+    cpu_request:
+      defaultLocator: /spec/containers/0/resources/requests/cpu
+      metrics:
+        usage:
+          # rate() over 5 min gives the per-second CPU consumption.
+          query: >-
+            sum(rate(container_cpu_usage_seconds_total{
+              namespace="$namespace", pod="$pod", container="$container",
+              container!="POD", container!=""
+            }[5m]))
+        configured:
+          query: >-
+            kube_pod_container_resource_requests{
+              resource="cpu",
+              namespace="$namespace", pod="$pod", container="$container"
+            }
+
+    memory_request:
+      defaultLocator: /spec/containers/0/resources/requests/memory
+      metrics:
+        usage:
+          # working_set_bytes is what the OOM killer uses — the right proxy for requests.
+          metric: container_memory_working_set_bytes
+          label_map:
+            namespace: namespace
+            pod: pod_name
+            container: container_name
+        configured:
+          query: >-
+            kube_pod_container_resource_requests{
+              resource="memory",
+              namespace="$namespace", pod="$pod", container="$container"
+            }
+
+    cpu_limit:
+      defaultLocator: /spec/containers/0/resources/limits/cpu
+      metrics:
+        configured:
+          query: >-
+            kube_pod_container_resource_limits{
+              resource="cpu",
+              namespace="$namespace", pod="$pod", container="$container"
+            }
+
+    memory_limit:
+      defaultLocator: /spec/containers/0/resources/limits/memory
+      metrics:
+        usage:
+          metric: container_memory_working_set_bytes
+          label_map:
+            namespace: namespace
+            pod: pod_name
+            container: container_name
+        configured:
+          query: >-
+            kube_pod_container_resource_limits{
+              resource="memory",
+              namespace="$namespace", pod="$pod", container="$container"
+            }
+
+    ephemeral_storage:
+      defaultLocator: /spec/containers/0/resources/limits/ephemeral-storage
+      # No usage metric — ephemeral storage is not exposed via cadvisor by default.
+      # Use a static Strategy for this field (see samples/strategies/static.yaml).
