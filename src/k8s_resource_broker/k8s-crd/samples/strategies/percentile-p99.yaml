@@ -13,8 +13,6 @@ metadata:
   name: percentile-p99
 spec:
   algo: percentile
-  schedule:
-    cron: "0 */3 * * *"   # re-evaluate every 3 hours — tighter cadence for limits
   args:
     percentile-type:
       type: string

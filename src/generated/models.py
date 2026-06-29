@@ -68,13 +68,6 @@ class StrategyCRD(BaseModel):
         str | None,
         Field(description="Docker image for the strategy runner (algo=image only)."),
     ] = None
-    cron: Annotated[
-        str | None,
-        Field(
-            description="Re-evaluation schedule as a 5-field cron expression (from spec.schedule.cron). Null when no schedule is configured.",
-            examples=["0 */6 * * *"],
-        ),
-    ] = None
     args_schema: Annotated[
         dict[str, ArgDefinition] | None,
         Field(description="Parsed argument schema keyed by argument name."),
@@ -167,6 +160,13 @@ class StrategyRef(BaseModel):
             min_length=1,
         ),
     ]
+    cron: Annotated[
+        str | None,
+        Field(
+            description="Re-evaluation cadence for this strategy binding as a 5-field cron expression. Null when no schedule is configured on this binding.",
+            examples=["0 */6 * * *"],
+        ),
+    ] = None
     args: Annotated[
         dict[str, Any] | None,
         Field(

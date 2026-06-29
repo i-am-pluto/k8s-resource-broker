@@ -31,6 +31,7 @@ spec:
   # percentile-p75 with a 7-day lookback is a solid baseline for requests.
   default-strategy:
     ref: percentile-p75
+    cron: "0 */6 * * *"            # re-evaluate every 6 hours
     args:
       coolback-period: "168h"       # 7-day lookback — smooths short-lived spikes
 

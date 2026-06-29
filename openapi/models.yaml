@@ -58,12 +58,6 @@ components:
         image:
           type: string
           description: Docker image for the strategy runner (algo=image only).
-        cron:
-          type: string
-          description: >
-            Re-evaluation schedule as a 5-field cron expression (from spec.schedule.cron).
-            Null when no schedule is configured on the Strategy.
-          example: "0 */6 * * *"
         args_schema:
           type: object
           description: Parsed argument schema keyed by argument name.
@@ -164,6 +158,12 @@ components:
           minLength: 1
           description: Name of a cluster-scoped Strategy CR.
           example: percentile-p75
+        cron:
+          type: string
+          description: >
+            Re-evaluation cadence for this strategy binding as a 5-field cron expression.
+            Null when no schedule is configured on this binding.
+          example: "0 */6 * * *"
         args:
           type: object
           description: >

@@ -68,6 +68,15 @@ spec:
                       type: string
                       minLength: 1
                       description: Name of a cluster-scoped Strategy CR.
+                    cron:
+                      type: string
+                      nullable: true
+                      pattern: '^(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)$'
+                      description: >
+                        Re-evaluation cadence for this strategy binding as a standard 5-field
+                        cron expression (minute hour day-of-month month day-of-week).
+                        Omit to disable periodic scheduling for this binding.
+                        Examples: "0 */6 * * *" (every 6 h), "*/30 * * * *" (every 30 min).
                     args:
                       type: object
                       description: >
@@ -104,6 +113,14 @@ spec:
                             type: string
                             minLength: 1
                             description: Name of a cluster-scoped Strategy CR.
+                          cron:
+                            type: string
+                            nullable: true
+                            pattern: '^(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)\s+(\*|[0-9,\-\*\/]+)$'
+                            description: >
+                              Re-evaluation cadence for this field's strategy binding.
+                              Overrides the default-strategy cron when set.
+                              Omit to inherit the default-strategy cron.
                           args:
                             type: object
                             description: >
@@ -153,6 +170,9 @@ spec:
         - name: Strategy
           type: string
           jsonPath: .spec['default-strategy'].ref
+        - name: Schedule
+          type: string
+          jsonPath: .spec['default-strategy'].cron
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
