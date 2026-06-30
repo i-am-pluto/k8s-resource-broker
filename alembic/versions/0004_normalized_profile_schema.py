@@ -5,8 +5,8 @@ Replaces the flat resource_profiles table (ON CONFLICT DO UPDATE, JSONB fields b
   - resource_profile_field_strategies — normalized field-level strategies (one row per field)
   - profile_recommendations    — audit trail: profile_id → patches given to each pod
 
-Revision ID: 0003
-Revises: 0001
+Revision ID: 0004
+Revises: 0003
 Create Date: 2026-06-13
 """
 
@@ -18,14 +18,13 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0003"
-down_revision: Union[str, None] = "0001"
+revision: str = "0004"
+down_revision: Union[str, None] = "0003"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # SCD Type 2 spine — one row per profile version.
     op.create_table(
         "resource_profile_versions",
         sa.Column("profile_id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
@@ -36,15 +35,12 @@ def upgrade() -> None:
         sa.Column("default_algo", sa.String(64), nullable=True),
         sa.Column("default_algo_config", postgresql.JSONB(), nullable=True),
         sa.Column("content_hash", sa.String(64), nullable=False),
-        # Optimistic concurrency version. Starts at 1 for every new SCD row.
-        # Expiry UPDATE uses WHERE version=$v; rowcount==0 means another replica won.
         sa.Column("version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("valid_from", sa.DateTime(timezone=True), nullable=False),
         sa.Column("valid_to", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.PrimaryKeyConstraint("profile_id"),
     )
-    # Partial index: fast current-version lookup; also enforces at-most-one current row per profile.
     op.create_index(
         "idx_profile_current",
         "resource_profile_versions",
@@ -57,14 +53,12 @@ def upgrade() -> None:
         ["name", "namespace", "valid_from"],
     )
 
-    # Normalized field strategies — one row per managed field per version.
     op.create_table(
         "resource_profile_field_strategies",
         sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
         sa.Column("profile_id", sa.Uuid(), nullable=False),
         sa.Column("field_name", sa.String(253), nullable=False),
         sa.Column("locator", sa.String(512), nullable=True),
-        # NULL algo = inherit profile-level default at runtime.
         sa.Column("algo", sa.String(64), nullable=True),
         sa.Column("algo_config", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("min_value", sa.String(64), nullable=True),
@@ -78,7 +72,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_field_strategy_profile", "resource_profile_field_strategies", ["profile_id"])
 
-    # Recommendation audit trail.
     op.create_table(
         "profile_recommendations",
         sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
@@ -108,10 +101,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("idx_recommendation_profile", table_name="profile_recommendations")
     op.drop_table("profile_recommendations")
-
     op.drop_index("idx_field_strategy_profile", table_name="resource_profile_field_strategies")
     op.drop_table("resource_profile_field_strategies")
-
     op.drop_index("idx_profile_history", table_name="resource_profile_versions")
     op.drop_index("idx_profile_current", table_name="resource_profile_versions")
     op.drop_table("resource_profile_versions")
