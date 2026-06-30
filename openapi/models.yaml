@@ -1,0 +1,264 @@
+openapi: "3.1.0"
+info:
+  title: k8s-resource-broker Models
+  version: v1alpha1
+  description: >
+    OpenAPI schema definitions for the two CRDs managed by resource-broker:
+    Profile (resource-broker.io/v1alpha1) and Strategy (resource-broker.io/v1alpha1).
+
+components:
+  schemas:
+
+    # ─────────────────────────────────────────────────────────────
+    # Strategy CRD
+    # ─────────────────────────────────────────────────────────────
+
+    ArgDefinition:
+      type: object
+      description: >
+        Definition of a single argument declared by a Strategy CRD.
+        Values for these args are supplied by the Profile that references this Strategy.
+      properties:
+        type:
+          type: string
+          enum: [string, integer, number, boolean, object]
+          description: Expected value type. Used by the broker to coerce and validate at runtime.
+        enum:
+          type: array
+          items: {}
+          description: Exhaustive list of allowed values. Broker rejects Profiles that supply out-of-list values.
+        required:
+          type: boolean
+          default: false
+          description: When true, the broker rejects any referencing Profile that omits this arg with no default.
+        default:
+          description: Value used when the referencing Profile omits this argument. Must match declared type.
+        description:
+          type: string
+          description: Human-readable explanation of this argument's purpose.
+
+    StrategyCRD:
+      type: object
+      description: >
+        In-memory / API representation of a Strategy custom resource (strategies.resource-broker.io/v1alpha1).
+        A Strategy defines an algorithm and its argument schema. One Strategy object can serve many Profiles
+        with different parameterisations.
+      required:
+        - name
+        - algo
+      properties:
+        name:
+          type: string
+          description: Kubernetes metadata.name of the Strategy CR.
+          example: percentile-p75
+        algo:
+          type: string
+          description: Algorithm identifier resolved from spec.algo.
+          example: percentile
+        image:
+          type: string
+          description: Docker image for the strategy runner (algo=image only).
+        args_schema:
+          type: object
+          description: Parsed argument schema keyed by argument name.
+          additionalProperties:
+            $ref: '#/components/schemas/ArgDefinition'
+
+    # ─────────────────────────────────────────────────────────────
+    # ResourceType CRD
+    # ─────────────────────────────────────────────────────────────
+
+    MetricConfig:
+      type: object
+      description: >
+        Describes how to query a single metric value (e.g. current usage or configured limit/request).
+        Either metric+label_map (broker builds the query) or query (full PromQL, used as-is) must be set.
+      properties:
+        metric:
+          type: string
+          description: Raw metric name. Broker constructs the PromQL expression using label_map.
+          example: container_cpu_usage_seconds_total
+        query:
+          type: string
+          description: Full PromQL expression. Overrides metric+label_map when provided.
+          example: 'sum(rate(container_cpu_usage_seconds_total{namespace="$namespace",pod="$pod"}[5m]))'
+        label_map:
+          type: object
+          description: >
+            Maps metric label names to k8s metadata keys (dynamic) or static filter values.
+            Used when metric is set; ignored when query is provided.
+          additionalProperties:
+            type: string
+          example:
+            namespace: namespace
+            pod: pod_name
+            container: container_name
+
+    FieldMetrics:
+      type: object
+      description: >
+        Metric configuration for a single resource field.
+        Both usage and configured are optional — broker falls back to cadvisor defaults if omitted.
+      properties:
+        usage:
+          $ref: '#/components/schemas/MetricConfig'
+          description: How to query the actual resource consumption for this field.
+        configured:
+          $ref: '#/components/schemas/MetricConfig'
+          description: How to query the currently configured value (limit or request) for this field.
+
+    ResourceTypeField:
+      type: object
+      required:
+        - locator
+      description: Definition of a single tunable field within a ResourceType CRD.
+      properties:
+        defaultLocator:
+          type: string
+          description: Default JSON patch path for this field in the target resource spec.
+          example: /spec/containers/0/resources/requests/cpu
+        metrics:
+          $ref: '#/components/schemas/FieldMetrics'
+          description: Optional metrics config. Omit to use broker cadvisor defaults.
+
+    ResourceTypeCRD:
+      type: object
+      description: >
+        In-memory / API representation of a ResourceType custom resource (resource-broker.io/v1alpha1).
+        A ResourceType defines the set of tunable fields for a class of resource (e.g. k8s-pod, k8s-node),
+        including default patch locators and optional metric queries for usage and configured values.
+        Profiles reference a ResourceType by name via resource_type_ref.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Kubernetes metadata.name of the ResourceType CR. Referenced by ResourceProfile.resource_type_ref.
+          example: k8s-pod
+        fields:
+          type: object
+          description: Map of logical field names to their definition.
+          additionalProperties:
+            $ref: '#/components/schemas/ResourceTypeField'
+
+    # ─────────────────────────────────────────────────────────────
+    # Profile CRD
+    # ─────────────────────────────────────────────────────────────
+
+    StrategyRef:
+      type: object
+      description: >
+        A reference to a Strategy CR with argument values to pass to it.
+        Used as both spec.default-strategy and per-field strategy overrides in a Profile.
+      required:
+        - ref
+      properties:
+        ref:
+          type: string
+          minLength: 1
+          description: Name of a cluster-scoped Strategy CR.
+          example: percentile-p75
+        args:
+          type: object
+          description: >
+            Argument values for the strategy. Keys must match the argument names declared
+            in the referenced Strategy CR. Validated by the broker at runtime, not at admission.
+          additionalProperties: true
+          example:
+            percentile-type: p75
+            coolback-period: "24h"
+
+    ResourceProfile:
+      type: object
+      description: >
+        In-memory / API representation of a Profile custom resource (profiles.resource-broker.io/v1alpha1).
+        A Profile declares which Kubernetes object type to tune, which strategy to apply by default,
+        and optional per-field overrides with min/max/locator constraints.
+      required:
+        - name
+        - resource_type_ref
+      properties:
+        name:
+          type: string
+          description: Kubernetes metadata.name of the Profile CR.
+          example: production-api
+        namespace:
+          type: string
+          description: Kubernetes metadata.namespace. Empty string for cluster-scoped resources.
+          example: ""
+        resource_type_ref:
+          type: string
+          description: Name of the ResourceType CR this profile targets. Resolved at runtime.
+          example: k8s-pod
+        mode:
+          type: string
+          enum: [recommendation, enforce]
+          default: recommendation
+          description: Parsed from spec.mode.
+        default_strategy:
+          $ref: '#/components/schemas/StrategyRef'
+          description: Parsed default strategy (from spec.default-strategy).
+        fields:
+          type: object
+          description: Parsed per-field tuning entries keyed by field name.
+          additionalProperties:
+            $ref: '#/components/schemas/FieldEntry'
+
+    # ─────────────────────────────────────────────────────────────
+    # Trigger CRD
+    # ─────────────────────────────────────────────────────────────
+
+    TriggerCRD:
+      type: object
+      description: >
+        Trigger CRD (triggers.resource-broker.io/v1alpha1).
+        Defines when to evaluate strategies for a Profile —
+        links a Profile to a list of Strategy refs and the full ResourceType definition.
+      required:
+        - name
+        - profile
+        - strategies
+        - resource_type
+      properties:
+        name:
+          type: string
+          description: Metadata name of the Trigger CR.
+        profile:
+          type: string
+          description: Reference to a ResourceProfile CR by name.
+        strategies:
+          type: array
+          items:
+            $ref: '#/components/schemas/StrategyRef'
+          description: List of strategy refs to evaluate when this trigger fires.
+        resource_type:
+          $ref: '#/components/schemas/ResourceTypeCRD'
+          description: Full ResourceType definition embedded inline.
+
+    FieldEntry:
+      type: object
+      description: >
+        Parsed per-field tuning configuration inside a ResourceProfile.
+        Produced from a Profile's spec.fields[<name>] entry.
+      properties:
+        locator:
+          type: string
+          description: JSON patch path to the field in the pod spec.
+          example: "/spec/containers/0/resources/requests/cpu"
+        min:
+          type: string
+          description: Hard lower bound (Kubernetes quantity notation).
+          example: "100m"
+        max:
+          type: string
+          description: Hard upper bound (Kubernetes quantity notation).
+          example: "4"
+        max_percentage:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Soft upper bound as a percentage of the pod's current value.
+          example: 150
+        strategy:
+          $ref: '#/components/schemas/StrategyRef'
+          description: Field-level strategy override. Null means fall back to the profile's default strategy.

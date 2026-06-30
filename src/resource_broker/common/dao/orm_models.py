@@ -3,7 +3,20 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Double, ForeignKey, Index, Integer, String, Uuid, func, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Double,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -12,24 +25,41 @@ class Base(DeclarativeBase):
     pass
 
 
-class PodMetricModel(Base):
-    __tablename__ = "pod_metrics"
+class ActiveServiceModel(Base):
+    __tablename__ = "active_services"
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    profile_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, server_default=text("gen_random_uuid()"))
     namespace: Mapped[str] = mapped_column(String(253), nullable=False)
-    pod_name: Mapped[str] = mapped_column(String(253), nullable=False)
-    container: Mapped[str] = mapped_column(String(253), nullable=False)
-    cpu_usage_cores: Mapped[float | None] = mapped_column(Double, nullable=True)
-    mem_usage_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    scraped_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
-    )
+    service_name: Mapped[str] = mapped_column(String(253), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(253), nullable=False)
 
-    __table_args__ = (
-        Index("idx_metrics_scraped", "profile_name", "scraped_at"),
-        Index("idx_metrics_pod", "namespace", "pod_name", "container"),
-    )
+    __table_args__ = (UniqueConstraint("namespace", "service_name", name="uq_active_services_ns_name"),)
+
+
+class ActivePodModel(Base):
+    __tablename__ = "active_pods"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, server_default=text("gen_random_uuid()"))
+    active_service_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("active_services.id"), nullable=False)
+    pod_name: Mapped[str] = mapped_column(String(253), nullable=False)
+    configured_resource: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    pod_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    restart_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_terminated_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    __table_args__ = (UniqueConstraint("active_service_id", "pod_name", name="uq_active_pods_service_pod"),)
+
+
+class PodPerformanceMetricModel(Base):
+    __tablename__ = "pod_performance_metric"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, server_default=text("gen_random_uuid()"))
+    active_pod_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("active_pods.id"), nullable=False)
+    cpu_usage_cores: Mapped[float] = mapped_column(Double, nullable=False)
+    mem_usage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    scraped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (Index("idx_pod_performance_metric_pod_time", "active_pod_id", "scraped_at"),)
 
 
 class ProfileVersionModel(Base):
@@ -109,8 +139,6 @@ class ProfileRecommendationModel(Base):
     pod_name: Mapped[str] = mapped_column(String(253), nullable=False)
     pod_namespace: Mapped[str] = mapped_column(String(253), nullable=False)
     patches: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    recommended_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    recommended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (Index("idx_recommendation_profile", "profile_id", "recommended_at"),)
