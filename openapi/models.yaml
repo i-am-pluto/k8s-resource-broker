@@ -204,6 +204,37 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/FieldEntry'
 
+    # ─────────────────────────────────────────────────────────────
+    # Trigger CRD
+    # ─────────────────────────────────────────────────────────────
+
+    TriggerCRD:
+      type: object
+      description: >
+        Trigger CRD (triggers.resource-broker.io/v1alpha1).
+        Defines when to evaluate strategies for a Profile —
+        links a Profile to a list of Strategy refs and the full ResourceType definition.
+      required:
+        - name
+        - profile
+        - strategies
+        - resource_type
+      properties:
+        name:
+          type: string
+          description: Metadata name of the Trigger CR.
+        profile:
+          type: string
+          description: Reference to a ResourceProfile CR by name.
+        strategies:
+          type: array
+          items:
+            $ref: '#/components/schemas/StrategyRef'
+          description: List of strategy refs to evaluate when this trigger fires.
+        resource_type:
+          $ref: '#/components/schemas/ResourceTypeCRD'
+          description: Full ResourceType definition embedded inline.
+
     FieldEntry:
       type: object
       description: >
